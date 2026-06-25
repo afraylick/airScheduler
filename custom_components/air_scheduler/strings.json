@@ -1,0 +1,104 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up thermostat scheduling",
+        "description": "Choose the climate entities Air Scheduler should manage.",
+        "data": {
+          "entities": "Thermostats",
+          "apply_on_start": "Apply the current scheduled state when Home Assistant starts"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Air Scheduler is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure Air Scheduler",
+        "menu_options": {
+          "thermostats": "Thermostats",
+          "state_settings": "State settings",
+          "schedule_times": "Schedule times"
+        },
+        "menu_option_descriptions": {
+          "thermostats": "Choose which climate entities Air Scheduler manages.",
+          "state_settings": "Define Home, Away, and Sleep settings for each thermostat.",
+          "schedule_times": "Add or remove times when a state is applied."
+        }
+      },
+      "thermostats": {
+        "title": "Thermostats",
+        "data": {
+          "entities": "Thermostats",
+          "apply_on_start": "Apply the current scheduled state when Home Assistant starts"
+        }
+      },
+      "state_settings": {
+        "title": "State settings",
+        "description": "Choose a state and thermostat to edit.",
+        "data": {
+          "profile": "State",
+          "entities": "Thermostat"
+        }
+      },
+      "edit_state": {
+        "title": "Edit {profile} settings",
+        "description": "{entities}",
+        "data": {
+          "hvac_mode": "HVAC mode",
+          "temperature": "Temperature",
+          "target_temp_low": "Low temperature",
+          "target_temp_high": "High temperature",
+          "preset_mode": "Preset mode",
+          "fan_mode": "Fan mode",
+          "humidity": "Humidity"
+        },
+        "data_description": {
+          "temperature": "Use for heat-only, cool-only, or single-setpoint thermostats.",
+          "target_temp_low": "Use with heat/cool thermostats.",
+          "target_temp_high": "Use with heat/cool thermostats.",
+          "preset_mode": "Leave blank unless your thermostat supports named presets.",
+          "fan_mode": "Leave blank unless your thermostat supports fan modes."
+        }
+      },
+      "schedule_times": {
+        "title": "Schedule times",
+        "menu_options": {
+          "add_schedule": "Add schedule time",
+          "remove_schedule": "Remove schedule time"
+        },
+        "menu_option_descriptions": {
+          "add_schedule": "Choose a state, time, days, and thermostats.",
+          "remove_schedule": "Delete an existing scheduled time."
+        }
+      },
+      "add_schedule": {
+        "title": "Add schedule time",
+        "data": {
+          "name": "Name",
+          "profile": "State",
+          "time": "Time",
+          "days": "Days",
+          "entities": "Thermostats",
+          "enabled": "Enabled"
+        },
+        "data_description": {
+          "days": "Leave empty to run every day."
+        }
+      },
+      "remove_schedule": {
+        "title": "Remove schedule time",
+        "data": {
+          "schedule_index": "Schedule"
+        }
+      }
+    },
+    "error": {
+      "no_thermostats": "Add at least one thermostat first.",
+      "no_schedules": "There are no schedules to remove."
+    }
+  }
+}

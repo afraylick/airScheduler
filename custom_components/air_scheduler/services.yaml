@@ -1,0 +1,31 @@
+set_config:
+  name: Set config
+  description: Replace the persisted Air Scheduler configuration.
+  fields:
+    config:
+      required: true
+      selector:
+        object:
+
+apply_profile:
+  name: Apply profile
+  description: Apply one climate profile immediately.
+  fields:
+    profile:
+      required: true
+      selector:
+        select:
+          options:
+            - home
+            - away
+            - sleep
+    entity_id:
+      required: false
+      selector:
+        entity:
+          domain: climate
+          multiple: true
+
+reload:
+  name: Reload
+  description: Reload the persisted Air Scheduler configuration and reschedule timers.

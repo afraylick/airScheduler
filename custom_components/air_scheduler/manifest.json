@@ -1,0 +1,8 @@
+{
+  "domain": "air_scheduler",
+  "name": "Air Scheduler",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/adam-froehlich/airScheduler",
+  "version": "0.1.0"
+}
