@@ -36,6 +36,8 @@ Schedule segments choose:
 
 Each schedule segment belongs to the thermostat section where it was created.
 
+Each thermostat also shows a Sunday-through-Saturday vertical week view. The view treats a segment as active from its start time until the next enabled segment for that thermostat, so you can quickly scan which Home, Away, or Sleep profile is active throughout the week.
+
 ## Config Shape
 
 The panel stores a config like this:

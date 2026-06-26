@@ -1,5 +1,15 @@
 const PROFILES = ["home", "away", "sleep"];
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const WEEK_VIEW_DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const DAY_LABELS = {
+  sun: "Sun",
+  mon: "Mon",
+  tue: "Tue",
+  wed: "Wed",
+  thu: "Thu",
+  fri: "Fri",
+  sat: "Sat",
+};
 const FALLBACK_HVAC_MODES = ["off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only"];
 const FALLBACK_FAN_MODES = ["auto", "on", "circulate", "quiet", "low", "medium", "high"];
 const SETTING_FIELDS = [
@@ -289,6 +299,129 @@ class AirSchedulerPanel extends HTMLElement {
       .filter(({ schedule }) => (schedule.entities || []).includes(entityId));
   }
 
+  _timeToMinutes(time) {
+    const match = /^(\d{1,2}):(\d{2})$/.exec(time || "");
+    if (!match) {
+      return null;
+    }
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (hours > 23 || minutes > 59) {
+      return null;
+    }
+    return hours * 60 + minutes;
+  }
+
+  _formatMinutes(minutes) {
+    const normalized = minutes % 1440;
+    const hours = Math.floor(normalized / 60);
+    const mins = normalized % 60;
+    const suffix = hours >= 12 ? "PM" : "AM";
+    const hour = hours % 12 || 12;
+    return `${hour}:${String(mins).padStart(2, "0")} ${suffix}`;
+  }
+
+  _hourLabel(hour) {
+    const suffix = hour >= 12 ? "PM" : "AM";
+    return `${hour % 12 || 12} ${suffix}`;
+  }
+
+  _profileLabel(profile) {
+    return `${profile.charAt(0).toUpperCase()}${profile.slice(1)}`;
+  }
+
+  _weekBlocksForEntity(entityId) {
+    const transitions = [];
+    for (const { schedule, index } of this._scheduleEntriesForEntity(entityId)) {
+      if (schedule.enabled === false) {
+        continue;
+      }
+      const minutes = this._timeToMinutes(schedule.time);
+      if (minutes === null) {
+        continue;
+      }
+      for (const day of schedule.days || []) {
+        const dayIndex = WEEK_VIEW_DAYS.indexOf(day);
+        if (dayIndex === -1) {
+          continue;
+        }
+        transitions.push({
+          day,
+          dayIndex,
+          minutes,
+          absolute: dayIndex * 1440 + minutes,
+          schedule,
+          index,
+        });
+      }
+    }
+
+    const blocksByDay = new Map(WEEK_VIEW_DAYS.map((day) => [day, []]));
+    if (!transitions.length) {
+      return blocksByDay;
+    }
+
+    transitions.sort((a, b) => a.absolute - b.absolute || a.index - b.index);
+    const findActiveTransition = (minute) => {
+      let active = transitions[transitions.length - 1];
+      for (const transition of transitions) {
+        if (transition.absolute <= minute) {
+          active = transition;
+        } else {
+          break;
+        }
+      }
+      return active;
+    };
+
+    WEEK_VIEW_DAYS.forEach((day, dayIndex) => {
+      const dayStart = dayIndex * 1440;
+      const dayEnd = dayStart + 1440;
+      const dayTransitions = transitions.filter((transition) => transition.dayIndex === dayIndex);
+      const points = [...new Set([
+        dayStart,
+        ...dayTransitions
+          .map((transition) => transition.absolute)
+          .filter((minute) => minute > dayStart && minute < dayEnd),
+        dayEnd,
+      ])].sort((a, b) => a - b);
+
+      for (let pointIndex = 0; pointIndex < points.length - 1; pointIndex += 1) {
+        const start = points[pointIndex];
+        const end = points[pointIndex + 1];
+        if (end <= start) {
+          continue;
+        }
+        const active = findActiveTransition(start);
+        const profile = PROFILES.includes(active.schedule.profile) ? active.schedule.profile : "home";
+        const blocks = blocksByDay.get(day);
+        const previousBlock = blocks[blocks.length - 1];
+        if (
+          previousBlock &&
+          previousBlock.index === active.index &&
+          previousBlock.profile === profile &&
+          previousBlock.endMinute === start - dayStart
+        ) {
+          previousBlock.endMinute = end - dayStart;
+          previousBlock.height = ((end - dayStart - previousBlock.startMinute) / 1440) * 100;
+          continue;
+        }
+        blocks.push({
+          index: active.index,
+          profile,
+          name: active.schedule.name || this._profileLabel(profile),
+          startMinute: start - dayStart,
+          endMinute: end - dayStart,
+          time: active.schedule.time || "06:30",
+          top: ((start - dayStart) / 1440) * 100,
+          height: ((end - start) / 1440) * 100,
+        });
+      }
+    });
+
+    return blocksByDay;
+  }
+
   async _applyProfile(profile) {
     try {
       await this._hass.callWS({
@@ -505,6 +638,7 @@ class AirSchedulerPanel extends HTMLElement {
                 </div>
               </div>
               ${schedules.length ? `
+                ${this._renderWeekView(entityId)}
                 <div class="schedule-list">
                   ${schedules.map(({ schedule, index }) => this._renderScheduleRow(schedule, index)).join("")}
                 </div>
@@ -516,9 +650,48 @@ class AirSchedulerPanel extends HTMLElement {
     `;
   }
 
+  _renderWeekView(entityId) {
+    const blocksByDay = this._weekBlocksForEntity(entityId);
+    return `
+      <div class="week-view" aria-label="${this._escape(this._friendlyName(entityId))} weekly schedule">
+        <div class="week-header">
+          <div class="week-time-head"></div>
+          ${WEEK_VIEW_DAYS.map((day) => `
+            <div class="week-day-head">
+              <strong>${DAY_LABELS[day]}</strong>
+            </div>
+          `).join("")}
+        </div>
+        <div class="week-body">
+          <div class="time-rail">
+            ${Array.from({ length: 24 }, (_, hour) => `
+              <span style="top: ${(hour / 24) * 100}%">${this._hourLabel(hour)}</span>
+            `).join("")}
+          </div>
+          ${WEEK_VIEW_DAYS.map((day) => `
+            <div class="week-day-column">
+              ${blocksByDay.get(day).map((block) => `
+                <button
+                  class="week-block profile-${block.profile}"
+                  data-focus-schedule="${block.index}"
+                  style="top: ${block.top}%; height: ${block.height}%;"
+                  title="${this._escape(`${DAY_LABELS[day]} ${this._formatMinutes(block.startMinute)}-${this._formatMinutes(block.endMinute)}: ${block.name}`)}"
+                >
+                  <strong>${this._profileLabel(block.profile)}</strong>
+                  <span>${this._escape(block.name)}</span>
+                  <small>${this._formatMinutes(block.startMinute)}-${this._formatMinutes(block.endMinute)}</small>
+                </button>
+              `).join("")}
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }
+
   _renderScheduleRow(schedule, index) {
     return `
-      <div class="schedule-row">
+      <div class="schedule-row" data-schedule-row="${index}">
         <div class="schedule-main">
           <label class="name-field">
             <span>Name</span>
@@ -543,7 +716,7 @@ class AirSchedulerPanel extends HTMLElement {
           <button class="danger" data-remove-schedule="${index}">Remove</button>
         </div>
         <div class="chip-row">
-          ${DAYS.map((day) => `
+          ${WEEK_VIEW_DAYS.map((day) => `
             <button class="${(schedule.days || []).includes(day) ? "selected" : ""}" data-schedule-day="${index}:${day}">
               ${day}
             </button>
@@ -607,6 +780,13 @@ class AirSchedulerPanel extends HTMLElement {
       button.addEventListener("click", () => {
         const [index, day] = button.dataset.scheduleDay.split(":");
         this._toggleScheduleDay(Number(index), day);
+      });
+    });
+    this.querySelectorAll("[data-focus-schedule]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const row = this.querySelector(`[data-schedule-row="${button.dataset.focusSchedule}"]`);
+        row?.scrollIntoView({ block: "center", behavior: "smooth" });
+        row?.querySelector("[data-schedule-field='name']")?.focus();
       });
     });
   }
@@ -817,6 +997,115 @@ class AirSchedulerPanel extends HTMLElement {
         .thermostat-actions {
           flex-wrap: wrap;
           justify-content: flex-end;
+        }
+        .week-view {
+          border: 1px solid var(--divider-color);
+          border-radius: 6px;
+          margin-bottom: 14px;
+          overflow-x: auto;
+          background: var(--card-background-color);
+        }
+        .week-header,
+        .week-body {
+          display: grid;
+          grid-template-columns: 54px repeat(7, minmax(118px, 1fr));
+          min-width: 900px;
+        }
+        .week-header {
+          border-bottom: 1px solid var(--divider-color);
+        }
+        .week-time-head,
+        .week-day-head {
+          min-height: 42px;
+          padding: 8px;
+          box-sizing: border-box;
+        }
+        .week-day-head {
+          border-left: 1px solid var(--divider-color);
+        }
+        .week-day-head strong {
+          font-size: 13px;
+        }
+        .week-body {
+          --week-height: 720px;
+          height: var(--week-height);
+          background:
+            repeating-linear-gradient(
+              to bottom,
+              transparent 0,
+              transparent 29px,
+              var(--divider-color) 30px
+            );
+        }
+        .time-rail,
+        .week-day-column {
+          position: relative;
+          min-height: var(--week-height);
+        }
+        .time-rail {
+          background: var(--primary-background-color);
+        }
+        .time-rail span {
+          position: absolute;
+          right: 8px;
+          transform: translateY(-50%);
+          color: var(--secondary-text-color);
+          font-size: 11px;
+          line-height: 1;
+          white-space: nowrap;
+        }
+        .time-rail span:first-child {
+          transform: translateY(0);
+        }
+        .week-day-column {
+          border-left: 1px solid var(--divider-color);
+        }
+        .week-block {
+          position: absolute;
+          left: 6px;
+          right: 6px;
+          min-height: 22px;
+          border-radius: 5px;
+          border: 1px solid transparent;
+          border-left-width: 4px;
+          padding: 6px 7px;
+          box-sizing: border-box;
+          overflow: hidden;
+          text-align: left;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          align-items: stretch;
+          cursor: pointer;
+        }
+        .week-block strong,
+        .week-block span,
+        .week-block small {
+          display: block;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .week-block strong {
+          font-size: 12px;
+          line-height: 1.1;
+        }
+        .week-block span,
+        .week-block small {
+          font-size: 11px;
+          line-height: 1.2;
+        }
+        .week-block.profile-home {
+          background: rgba(47, 158, 68, 0.16);
+          border-color: rgba(47, 158, 68, 0.72);
+        }
+        .week-block.profile-away {
+          background: rgba(230, 126, 34, 0.16);
+          border-color: rgba(230, 126, 34, 0.72);
+        }
+        .week-block.profile-sleep {
+          background: rgba(52, 152, 219, 0.17);
+          border-color: rgba(52, 152, 219, 0.72);
         }
         .schedule-list {
           display: flex;
