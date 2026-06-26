@@ -2,6 +2,7 @@ const PROFILES = ["home", "away", "sleep"];
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri"];
 const WEEKENDS = ["sat", "sun"];
+const FALLBACK_HVAC_MODES = ["off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only"];
 const SETTING_FIELDS = [
   ["hvac_mode", "HVAC"],
   ["temperature", "Temp"],
@@ -29,8 +30,6 @@ class AirSchedulerPanel extends HTMLElement {
     this._hass = hass;
     if (!this._config && !this._loading) {
       this._loadConfig();
-    } else if (this._config) {
-      this._render();
     }
   }
 
@@ -101,6 +100,11 @@ class AirSchedulerPanel extends HTMLElement {
     return state?.attributes?.friendly_name || entityId;
   }
 
+  _hvacModes(entityId) {
+    const modes = this._hass?.states?.[entityId]?.attributes?.hvac_modes;
+    return Array.isArray(modes) && modes.length ? modes : FALLBACK_HVAC_MODES;
+  }
+
   _addEntity(entityId) {
     if (!entityId || this._config.entities.includes(entityId)) {
       return;
@@ -132,6 +136,51 @@ class AirSchedulerPanel extends HTMLElement {
     } else {
       settings[key] = value;
     }
+    if (key === "hvac_mode") {
+      this._pruneDisabledSettings(profile, entityId);
+    }
+  }
+
+  _isSettingDisabled(key, hvacMode) {
+    if (!["temperature", "target_temp_low", "target_temp_high"].includes(key)) {
+      return false;
+    }
+    if (["off", "fan_only"].includes(hvacMode)) {
+      return true;
+    }
+    if (key === "target_temp_low") {
+      return ["cool", "dry"].includes(hvacMode);
+    }
+    if (key === "target_temp_high") {
+      return ["heat", "dry"].includes(hvacMode);
+    }
+    return false;
+  }
+
+  _pruneDisabledSettings(profile, entityId) {
+    const settings = this._config.profiles[profile][entityId];
+    const hvacMode = settings.hvac_mode || "";
+    for (const key of ["temperature", "target_temp_low", "target_temp_high"]) {
+      if (this._isSettingDisabled(key, hvacMode)) {
+        delete settings[key];
+      }
+    }
+  }
+
+  _updateTemperatureAvailability(profile, entityId) {
+    const hvacMode = this._config.profiles[profile]?.[entityId]?.hvac_mode || "";
+    this.querySelectorAll(`[data-profile="${profile}"][data-entity="${entityId}"][data-setting]`)
+      .forEach((input) => {
+        const key = input.dataset.setting;
+        if (key === "hvac_mode") {
+          return;
+        }
+        const disabled = this._isSettingDisabled(key, hvacMode);
+        input.disabled = disabled;
+        if (disabled) {
+          input.value = "";
+        }
+      });
   }
 
   _addSchedule(kind) {
@@ -320,18 +369,32 @@ class AirSchedulerPanel extends HTMLElement {
 
   _renderProfileCell(profile, entityId) {
     const settings = this._config.profiles[profile]?.[entityId] || {};
+    const hvacMode = settings.hvac_mode || "";
     return `
       <div class="profile-cell">
         ${SETTING_FIELDS.map(([key, label]) => `
           <label>
             <span>${label}</span>
-            <input
-              data-profile="${profile}"
-              data-entity="${entityId}"
-              data-setting="${key}"
-              value="${settings[key] ?? ""}"
-              placeholder="${key === "hvac_mode" ? "heat_cool" : ""}"
-            >
+            ${key === "hvac_mode" ? `
+              <select
+                data-profile="${profile}"
+                data-entity="${entityId}"
+                data-setting="${key}"
+              >
+                <option value="" ${settings[key] ? "" : "selected"}>Do not change</option>
+                ${this._hvacModes(entityId).map((mode) => `
+                  <option value="${mode}" ${settings[key] === mode ? "selected" : ""}>${mode}</option>
+                `).join("")}
+              </select>
+            ` : `
+              <input
+                data-profile="${profile}"
+                data-entity="${entityId}"
+                data-setting="${key}"
+                value="${settings[key] ?? ""}"
+                ${this._isSettingDisabled(key, hvacMode) ? "disabled" : ""}
+              >
+            `}
           </label>
         `).join("")}
       </div>
@@ -415,9 +478,14 @@ class AirSchedulerPanel extends HTMLElement {
       button.addEventListener("click", () => this._removeSchedule(Number(button.dataset.removeSchedule)));
     });
     this.querySelectorAll("[data-profile][data-entity][data-setting]").forEach((input) => {
-      input.addEventListener("change", () => {
+      const update = () => {
         this._setProfileValue(input.dataset.profile, input.dataset.entity, input.dataset.setting, input.value);
-      });
+        if (input.dataset.setting === "hvac_mode") {
+          this._updateTemperatureAvailability(input.dataset.profile, input.dataset.entity);
+        }
+      };
+      input.addEventListener("input", update);
+      input.addEventListener("change", update);
     });
     this.querySelectorAll("[data-schedule-field]").forEach((input) => {
       input.addEventListener("change", () => {

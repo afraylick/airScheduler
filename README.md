@@ -22,6 +22,8 @@ The Air Scheduler panel has three working areas:
 
 Home, Away, and Sleep are global state names, but each state can have different settings for each thermostat. For example, Bedroom Home can be 68-74 while Downstairs Home can be 66-75.
 
+HVAC mode is selected from a dropdown. Temperature fields that do not apply to the selected HVAC mode are disabled and are not saved.
+
 Schedules choose:
 
 - which profile to apply,
