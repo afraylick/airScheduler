@@ -14,11 +14,10 @@ After setup, open **Air Scheduler** from the Home Assistant sidebar.
 
 ## Configure in the Panel
 
-The Air Scheduler panel has three working areas:
+The Air Scheduler panel has two working areas:
 
-- **Thermostats**: choose the managed `climate.*` entities.
+- **Schedule**: add managed `climate.*` entities, then add schedule segments inside each thermostat section.
 - **State settings**: define Home, Away, and Sleep settings per thermostat.
-- **Schedule**: add weekday, weekend, or custom schedules.
 
 Home, Away, and Sleep are global state names, but each state can have different settings for each thermostat. For example, Bedroom Home can be 68-74 while Downstairs Home can be 66-75.
 
@@ -29,12 +28,13 @@ Compatibility notes:
 - Frigidaire AC units from `bm1549/home-assistant-frigidaire` expose `off`, `cool`, `auto`, `fan_only`, and `dry`, with single target temperature and fan modes. Use `Temp` rather than `Low`/`High`.
 - Ecobee through HomeKit can expose `heat`, `cool`, `heat_cool`, and `off` depending on HomeKit characteristics. Use `Temp` for `heat`/`cool`, and `Low`/`High` for `heat_cool`.
 
-Schedules choose:
+Schedule segments choose:
 
 - which profile to apply,
 - what time to apply it,
-- which days it runs,
-- which thermostats it targets.
+- which days it runs.
+
+Each schedule segment belongs to the thermostat section where it was created.
 
 ## Config Shape
 
@@ -90,16 +90,16 @@ The panel stores a config like this:
       "days": ["mon", "tue", "wed", "thu", "fri"],
       "time": "06:30",
       "profile": "home",
-      "entities": ["climate.bedroom", "climate.downstairs"]
+      "entities": ["climate.bedroom"]
     },
     {
-      "id": "weekend_morning_home",
-      "name": "Weekend morning",
+      "id": "downstairs_weekday_morning_home",
+      "name": "Weekday morning",
       "enabled": true,
-      "days": ["sat", "sun"],
-      "time": "08:00",
+      "days": ["mon", "tue", "wed", "thu", "fri"],
+      "time": "06:30",
       "profile": "home",
-      "entities": ["climate.bedroom"]
+      "entities": ["climate.downstairs"]
     }
   ]
 }
@@ -119,3 +119,5 @@ entity_id:
 ## Upgrade Notes
 
 Version 0.3.0 replaces the integration Configure-menu editor with the Air Scheduler sidebar panel and restores one global schedule config with per-thermostat settings.
+
+Current panel builds schedule segments under each thermostat. Older schedule entries that target multiple thermostats are split into one segment per thermostat when edited in the panel.

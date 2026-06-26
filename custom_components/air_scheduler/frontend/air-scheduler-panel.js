@@ -1,7 +1,5 @@
 const PROFILES = ["home", "away", "sleep"];
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri"];
-const WEEKENDS = ["sat", "sun"];
 const FALLBACK_HVAC_MODES = ["off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only"];
 const FALLBACK_FAN_MODES = ["auto", "on", "circulate", "quiet", "low", "medium", "high"];
 const SETTING_FIELDS = [
@@ -22,7 +20,7 @@ class AirSchedulerPanel extends HTMLElement {
     this._saving = false;
     this._loading = false;
     this._error = "";
-    this._collapsedSections = new Set(["thermostats", "state_settings"]);
+    this._collapsedSections = new Set(["state_settings"]);
     if (this._hass) {
       this._loadConfig();
     } else {
@@ -91,6 +89,36 @@ class AirSchedulerPanel extends HTMLElement {
           this._config.profiles[profile][entityId] || {};
       }
     }
+
+    const schedules = [];
+    const usedScheduleIds = new Set();
+    for (const schedule of this._config.schedules) {
+      const targetEntities = [...new Set(
+        Array.isArray(schedule.entities) && schedule.entities.length
+          ? schedule.entities
+          : this._config.entities
+      )].filter((entityId) => this._config.entities.includes(entityId));
+
+      for (const entityId of targetEntities) {
+        const name = schedule.name || "Segment";
+        const normalized = {
+          ...schedule,
+          id: this._uniqueScheduleId(
+            targetEntities.length > 1 ? `${schedule.id || name}_${entityId}` : schedule.id || name,
+            usedScheduleIds
+          ),
+          name,
+          enabled: schedule.enabled !== false,
+          profile: PROFILES.includes(schedule.profile) ? schedule.profile : "home",
+          time: schedule.time || "06:30",
+          days: this._normalizeDays(schedule.days),
+          entities: [entityId],
+        };
+        usedScheduleIds.add(normalized.id);
+        schedules.push(normalized);
+      }
+    }
+    this._config.schedules = schedules;
   }
 
   get _climateEntities() {
@@ -131,9 +159,9 @@ class AirSchedulerPanel extends HTMLElement {
     for (const profile of PROFILES) {
       delete this._config.profiles[profile][entityId];
     }
-    for (const schedule of this._config.schedules) {
-      schedule.entities = (schedule.entities || []).filter((item) => item !== entityId);
-    }
+    this._config.schedules = this._config.schedules.filter(
+      (schedule) => !(schedule.entities || []).includes(entityId)
+    );
     this._render();
   }
 
@@ -193,21 +221,18 @@ class AirSchedulerPanel extends HTMLElement {
       });
   }
 
-  _addSchedule(kind) {
-    const defaults = {
-      weekday: { days: WEEKDAYS, name: "Weekday" },
-      weekend: { days: WEEKENDS, name: "Weekend" },
-      custom: { days: [], name: "Custom" },
-    }[kind];
-    const time = kind === "weekend" ? "08:00" : "06:30";
+  _addSchedule(entityId) {
+    if (!this._config.entities.includes(entityId)) {
+      return;
+    }
     this._config.schedules.push({
-      id: this._scheduleId(defaults.name),
-      name: defaults.name,
+      id: this._scheduleId(`${this._friendlyName(entityId)} Segment`),
+      name: "Segment",
       enabled: true,
       profile: "home",
-      time,
-      days: defaults.days,
-      entities: [...this._config.entities],
+      time: "06:30",
+      days: [...DAYS],
+      entities: [entityId],
     });
     this._render();
   }
@@ -238,21 +263,12 @@ class AirSchedulerPanel extends HTMLElement {
     this._render();
   }
 
-  _toggleScheduleEntity(index, entityId) {
-    const schedule = this._config.schedules[index];
-    const entities = new Set(schedule.entities || []);
-    if (entities.has(entityId)) {
-      entities.delete(entityId);
-    } else {
-      entities.add(entityId);
-    }
-    schedule.entities = this._config.entities.filter((item) => entities.has(item));
-    this._render();
+  _scheduleId(label) {
+    return this._uniqueScheduleId(label, new Set(this._config.schedules.map((schedule) => schedule.id)));
   }
 
-  _scheduleId(label) {
+  _uniqueScheduleId(label, existing) {
     const base = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "schedule";
-    const existing = new Set(this._config.schedules.map((schedule) => schedule.id));
     let candidate = base;
     let counter = 2;
     while (existing.has(candidate)) {
@@ -260,6 +276,17 @@ class AirSchedulerPanel extends HTMLElement {
       counter += 1;
     }
     return candidate;
+  }
+
+  _normalizeDays(days) {
+    const selected = new Set(Array.isArray(days) ? days : DAYS);
+    return DAYS.filter((day) => selected.has(day));
+  }
+
+  _scheduleEntriesForEntity(entityId) {
+    return this._config.schedules
+      .map((schedule, index) => ({ schedule, index }))
+      .filter(({ schedule }) => (schedule.entities || []).includes(entityId));
   }
 
   async _applyProfile(profile) {
@@ -338,12 +365,9 @@ class AirSchedulerPanel extends HTMLElement {
 
         ${this._error ? `<div class="error">${this._escape(this._error)}</div>` : ""}
 
-        <section data-section="thermostats" class="${this._isCollapsed("thermostats") ? "collapsed" : ""}">
+        <section>
           <div class="section-head">
-            <button class="section-toggle" data-toggle-section="thermostats" aria-expanded="${!this._isCollapsed("thermostats")}">
-              <span>${this._isCollapsed("thermostats") ? "▸" : "▾"}</span>
-              <h2>Thermostats</h2>
-            </button>
+            <h2>Schedule</h2>
             <div class="inline-add">
               <select id="entity-picker">
                 <option value="">Add thermostat...</option>
@@ -354,14 +378,8 @@ class AirSchedulerPanel extends HTMLElement {
               <button id="add-entity">Add</button>
             </div>
           </div>
-          <div class="section-body entity-list">
-            ${this._config.entities.map((entityId) => `
-              <div class="entity-pill">
-                <span>${this._escape(this._friendlyName(entityId))}</span>
-                <small>${entityId}</small>
-                <button data-remove-entity="${entityId}" title="Remove">×</button>
-              </div>
-            `).join("") || `<p class="empty">Add at least one climate entity.</p>`}
+          <div class="section-body">
+            ${this._renderSchedules()}
           </div>
         </section>
 
@@ -382,17 +400,6 @@ class AirSchedulerPanel extends HTMLElement {
           </div>
         </section>
 
-        <section>
-          <div class="section-head">
-            <h2>Schedule</h2>
-            <div class="profile-actions">
-              <button data-add-schedule="weekday">Add weekday</button>
-              <button data-add-schedule="weekend">Add weekend</button>
-              <button data-add-schedule="custom">Add custom</button>
-            </div>
-          </div>
-          ${this._renderSchedules()}
-        </section>
       </main>
     `;
 
@@ -477,56 +484,71 @@ class AirSchedulerPanel extends HTMLElement {
   }
 
   _renderSchedules() {
-    if (!this._config.schedules.length) {
-      return `<p class="empty">No schedules yet. Add a weekday or weekend schedule to start.</p>`;
+    if (!this._config.entities.length) {
+      return `<p class="empty">Add at least one climate entity to build a schedule.</p>`;
     }
 
     return `
-      <div class="schedule-list">
-        ${this._config.schedules.map((schedule, index) => `
-          <div class="schedule-row">
-            <div class="schedule-main">
-              <label>
-                <span>Name</span>
-                <input data-schedule="${index}" data-schedule-field="name" value="${schedule.name || ""}">
-              </label>
-              <label>
-                <span>State</span>
-                <select data-schedule="${index}" data-schedule-field="profile">
-                  ${PROFILES.map((profile) => `
-                    <option value="${profile}" ${schedule.profile === profile ? "selected" : ""}>${profile}</option>
-                  `).join("")}
-                </select>
-              </label>
-              <label>
-                <span>Time</span>
-                <input type="time" data-schedule="${index}" data-schedule-field="time" value="${schedule.time || "06:30"}">
-              </label>
-              <label class="enabled">
-                <span>Enabled</span>
-                <input type="checkbox" data-schedule="${index}" data-schedule-field="enabled" ${schedule.enabled !== false ? "checked" : ""}>
-              </label>
-              <button class="danger" data-remove-schedule="${index}">Remove</button>
-            </div>
-            <div class="chip-row">
-              ${DAYS.map((day) => `
-                <button class="${(schedule.days || []).includes(day) ? "selected" : ""}" data-schedule-day="${index}:${day}">
-                  ${day}
-                </button>
+      <div class="thermostat-schedules">
+        ${this._config.entities.map((entityId) => {
+          const schedules = this._scheduleEntriesForEntity(entityId);
+          return `
+            <article class="thermostat-schedule">
+              <div class="thermostat-schedule-head">
+                <div class="thermostat-title">
+                  <strong>${this._escape(this._friendlyName(entityId))}</strong>
+                  <small>${entityId}</small>
+                </div>
+                <div class="thermostat-actions">
+                  <button data-add-schedule="${entityId}">Add segment</button>
+                  <button class="danger" data-remove-entity="${entityId}" title="Remove thermostat">Remove</button>
+                </div>
+              </div>
+              ${schedules.length ? `
+                <div class="schedule-list">
+                  ${schedules.map(({ schedule, index }) => this._renderScheduleRow(schedule, index)).join("")}
+                </div>
+              ` : `<p class="empty schedule-empty">No segments yet.</p>`}
+            </article>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  _renderScheduleRow(schedule, index) {
+    return `
+      <div class="schedule-row">
+        <div class="schedule-main">
+          <label class="name-field">
+            <span>Name</span>
+            <input data-schedule="${index}" data-schedule-field="name" value="${this._escape(schedule.name || "")}">
+          </label>
+          <label>
+            <span>State</span>
+            <select data-schedule="${index}" data-schedule-field="profile">
+              ${PROFILES.map((profile) => `
+                <option value="${profile}" ${schedule.profile === profile ? "selected" : ""}>${profile}</option>
               `).join("")}
-              <button data-set-days="${index}:weekday">weekdays</button>
-              <button data-set-days="${index}:weekend">weekends</button>
-              <button data-set-days="${index}:all">all days</button>
-            </div>
-            <div class="chip-row">
-              ${this._config.entities.map((entityId) => `
-                <button class="${(schedule.entities || []).includes(entityId) ? "selected" : ""}" data-schedule-entity="${index}:${entityId}">
-                  ${this._escape(this._friendlyName(entityId))}
-                </button>
-              `).join("")}
-            </div>
-          </div>
-        `).join("")}
+            </select>
+          </label>
+          <label>
+            <span>Time</span>
+            <input type="time" data-schedule="${index}" data-schedule-field="time" value="${schedule.time || "06:30"}">
+          </label>
+          <label class="enabled">
+            <span>Enabled</span>
+            <input type="checkbox" data-schedule="${index}" data-schedule-field="enabled" ${schedule.enabled !== false ? "checked" : ""}>
+          </label>
+          <button class="danger" data-remove-schedule="${index}">Remove</button>
+        </div>
+        <div class="chip-row">
+          ${DAYS.map((day) => `
+            <button class="${(schedule.days || []).includes(day) ? "selected" : ""}" data-schedule-day="${index}:${day}">
+              ${day}
+            </button>
+          `).join("")}
+        </div>
       </div>
     `;
   }
@@ -587,20 +609,6 @@ class AirSchedulerPanel extends HTMLElement {
         this._toggleScheduleDay(Number(index), day);
       });
     });
-    this.querySelectorAll("[data-set-days]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const [index, kind] = button.dataset.setDays.split(":");
-        const schedule = this._config.schedules[Number(index)];
-        schedule.days = kind === "weekday" ? WEEKDAYS : kind === "weekend" ? WEEKENDS : DAYS;
-        this._render();
-      });
-    });
-    this.querySelectorAll("[data-schedule-entity]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const [index, entityId] = button.dataset.scheduleEntity.split(":");
-        this._toggleScheduleEntity(Number(index), entityId);
-      });
-    });
   }
 
   _escape(value) {
@@ -625,7 +633,7 @@ class AirSchedulerPanel extends HTMLElement {
           margin: 0 auto;
           padding: 24px;
         }
-        header, .section-head, .schedule-main, .entity-pill, .chip-row, .header-actions, .profile-actions, .inline-add {
+        header, .section-head, .schedule-main, .entity-pill, .chip-row, .header-actions, .profile-actions, .inline-add, .thermostat-schedule-head, .thermostat-actions {
           display: flex;
           align-items: center;
           gap: 12px;
@@ -782,6 +790,34 @@ class AirSchedulerPanel extends HTMLElement {
           color: var(--secondary-text-color);
           font-size: 12px;
         }
+        .thermostat-schedules {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+        .thermostat-schedule {
+          border: 1px solid var(--divider-color);
+          border-radius: 6px;
+          background: var(--card-background-color);
+          padding: 14px;
+        }
+        .thermostat-schedule-head {
+          justify-content: space-between;
+          margin-bottom: 12px;
+        }
+        .thermostat-title {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+          min-width: 0;
+        }
+        .thermostat-title small {
+          word-break: break-word;
+        }
+        .thermostat-actions {
+          flex-wrap: wrap;
+          justify-content: flex-end;
+        }
         .schedule-list {
           display: flex;
           flex-direction: column;
@@ -800,9 +836,16 @@ class AirSchedulerPanel extends HTMLElement {
         .schedule-main label {
           min-width: 140px;
         }
-        .schedule-main label:first-child {
-          min-width: 220px;
-          flex: 1;
+        .schedule-main .name-field {
+          flex: 0 0 132px;
+          min-width: 112px;
+        }
+        .schedule-main .name-field input {
+          width: 100%;
+          box-sizing: border-box;
+        }
+        .schedule-empty {
+          padding: 4px 0;
         }
         .chip-row {
           flex-wrap: wrap;
@@ -815,9 +858,12 @@ class AirSchedulerPanel extends HTMLElement {
           main {
             padding: 16px;
           }
-          header, .section-head {
+          header, .section-head, .thermostat-schedule-head {
             align-items: stretch;
             flex-direction: column;
+          }
+          .thermostat-actions {
+            justify-content: flex-start;
           }
           .profile-grid {
             grid-template-columns: 160px repeat(3, 220px);
