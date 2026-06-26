@@ -453,11 +453,7 @@ class AirScheduler:
             if hvac_mode == "off":
                 return
 
-        temperature_data = {
-            key: settings[key]
-            for key in ("temperature", "target_temp_low", "target_temp_high")
-            if key in settings
-        }
+        temperature_data = self._temperature_data_for_mode(settings)
         if temperature_data:
             temperature_data[ATTR_ENTITY_ID] = entity_id
             await self.hass.services.async_call(
@@ -483,6 +479,29 @@ class AirScheduler:
                 },
                 blocking=False,
             )
+
+    @staticmethod
+    def _temperature_data_for_mode(settings: dict[str, Any]) -> dict[str, Any]:
+        """Return temperature fields valid for the configured HVAC mode."""
+        hvac_mode = settings.get(CONF_HVAC_MODE)
+        if hvac_mode in ("off", "fan_only"):
+            return {}
+        if hvac_mode == "heat_cool":
+            return {
+                key: settings[key]
+                for key in ("target_temp_low", "target_temp_high")
+                if key in settings
+            }
+        if hvac_mode:
+            return {
+                "temperature": settings["temperature"]
+            } if "temperature" in settings else {}
+
+        return {
+            key: settings[key]
+            for key in ("temperature", "target_temp_low", "target_temp_high")
+            if key in settings
+        }
 
     async def _async_fire(self, now: datetime) -> None:
         """Apply schedules matching this fire time."""

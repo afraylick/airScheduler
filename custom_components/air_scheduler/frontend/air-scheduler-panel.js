@@ -105,6 +105,11 @@ class AirSchedulerPanel extends HTMLElement {
     return Array.isArray(modes) && modes.length ? modes : FALLBACK_HVAC_MODES;
   }
 
+  _fanModes(entityId) {
+    const modes = this._hass?.states?.[entityId]?.attributes?.fan_modes;
+    return Array.isArray(modes) ? modes : [];
+  }
+
   _addEntity(entityId) {
     if (!entityId || this._config.entities.includes(entityId)) {
       return;
@@ -148,13 +153,13 @@ class AirSchedulerPanel extends HTMLElement {
     if (["off", "fan_only"].includes(hvacMode)) {
       return true;
     }
-    if (key === "target_temp_low") {
-      return ["cool", "dry"].includes(hvacMode);
+    if (!hvacMode) {
+      return false;
     }
-    if (key === "target_temp_high") {
-      return ["heat", "dry"].includes(hvacMode);
+    if (hvacMode === "heat_cool") {
+      return key === "temperature";
     }
-    return false;
+    return key === "target_temp_low" || key === "target_temp_high";
   }
 
   _pruneDisabledSettings(profile, entityId) {
@@ -370,6 +375,7 @@ class AirSchedulerPanel extends HTMLElement {
   _renderProfileCell(profile, entityId) {
     const settings = this._config.profiles[profile]?.[entityId] || {};
     const hvacMode = settings.hvac_mode || "";
+    const datalistId = `fan-modes-${profile}-${entityId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
     return `
       <div class="profile-cell">
         ${SETTING_FIELDS.map(([key, label]) => `
@@ -386,6 +392,20 @@ class AirSchedulerPanel extends HTMLElement {
                   <option value="${mode}" ${settings[key] === mode ? "selected" : ""}>${mode}</option>
                 `).join("")}
               </select>
+            ` : key === "fan_mode" ? `
+              <input
+                data-profile="${profile}"
+                data-entity="${entityId}"
+                data-setting="${key}"
+                value="${settings[key] ?? ""}"
+                list="${datalistId}"
+                placeholder="Optional"
+              >
+              <datalist id="${datalistId}">
+                ${this._fanModes(entityId).map((mode) => `
+                  <option value="${mode}"></option>
+                `).join("")}
+              </datalist>
             ` : `
               <input
                 data-profile="${profile}"
@@ -577,6 +597,11 @@ class AirSchedulerPanel extends HTMLElement {
           background: var(--card-background-color);
           border-radius: 6px;
           padding: 8px 10px;
+        }
+        input:disabled {
+          background: var(--disabled-color, rgba(128, 128, 128, 0.16));
+          color: var(--disabled-text-color, var(--secondary-text-color));
+          opacity: 1;
         }
         button {
           cursor: pointer;

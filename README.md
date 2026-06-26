@@ -22,7 +22,12 @@ The Air Scheduler panel has three working areas:
 
 Home, Away, and Sleep are global state names, but each state can have different settings for each thermostat. For example, Bedroom Home can be 68-74 while Downstairs Home can be 66-75.
 
-HVAC mode is selected from a dropdown. Temperature fields that do not apply to the selected HVAC mode are disabled and are not saved.
+HVAC mode is selected from a dropdown. Temperature fields that do not apply to the selected HVAC mode are disabled, shaded, and are not saved. Fan mode uses suggestions from Home Assistant when available, but also accepts custom values.
+
+Compatibility notes:
+
+- Frigidaire AC units from `bm1549/home-assistant-frigidaire` expose `off`, `cool`, `auto`, `fan_only`, and `dry`, with single target temperature and fan modes. Use `Temp` rather than `Low`/`High`.
+- Ecobee through HomeKit can expose `heat`, `cool`, `heat_cool`, and `off` depending on HomeKit characteristics. Use `Temp` for `heat`/`cool`, and `Low`/`High` for `heat_cool`.
 
 Schedules choose:
 
