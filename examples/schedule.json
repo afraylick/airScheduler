@@ -32,6 +32,12 @@
       "profile": "away"
     },
     {
+      "id": "weekend_home",
+      "days": ["sat", "sun"],
+      "time": "08:00",
+      "profile": "home"
+    },
+    {
       "id": "daily_sleep",
       "time": "22:30",
       "profile": "sleep"

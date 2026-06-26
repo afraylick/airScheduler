@@ -23,9 +23,11 @@ Open **Settings > Devices & services > Air Scheduler**, then choose the thermost
 The configure screen is split into separate sections:
 
 - **State settings**: define the climate settings for Home, Away, and Sleep for this thermostat.
-- **Schedule times**: add or remove times when a state is applied to this thermostat.
+- **Schedule times**: add weekday, weekend, custom, or remove times when a state is applied to this thermostat.
 
 For each state, you can set HVAC mode, single temperature, heat/cool low and high temperatures, preset mode, fan mode, and humidity. Leave fields blank when that setting should not be changed.
+
+Each thermostat entry has its own state settings and its own schedule list, so the bedroom thermostat can have different Home/Away/Sleep temperatures and weekday/weekend times than the downstairs thermostat.
 
 ## Configure schedules
 
@@ -35,7 +37,7 @@ The key concepts are:
 
 - `profiles`: named states such as `home`, `away`, and `sleep`.
 - Each profile defines settings for one thermostat entry.
-- `schedules`: weekday/time rules that apply one profile to that thermostat.
+- `schedules`: weekday, weekend, or custom day/time rules that apply one profile to that thermostat.
 - `apply_on_start`: when true, Home Assistant restart applies the latest scheduled profile for the thermostat.
 
 Example service data:
@@ -67,6 +69,10 @@ config:
       days: [mon, tue, wed, thu, fri]
       time: "08:15"
       profile: away
+    - id: weekend_home
+      days: [sat, sun]
+      time: "08:00"
+      profile: home
     - id: daily_sleep
       time: "22:30"
       profile: sleep

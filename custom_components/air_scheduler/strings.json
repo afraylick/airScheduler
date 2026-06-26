@@ -14,7 +14,7 @@
       "already_configured": "This thermostat is already configured."
     }
   },
-  "options": {
+  "option": {
     "step": {
       "init": {
         "title": "Configure thermostat schedule",
@@ -57,11 +57,15 @@
       "schedule_times": {
         "title": "Schedule times",
         "menu_options": {
-          "add_schedule": "Add schedule time",
+          "add_weekday_schedule": "Add weekday schedule",
+          "add_weekend_schedule": "Add weekend schedule",
+          "add_schedule": "Add custom schedule",
           "remove_schedule": "Remove schedule time"
         },
         "menu_option_descriptions": {
-          "add_schedule": "Choose a state, time, and days.",
+          "add_weekday_schedule": "Monday through Friday.",
+          "add_weekend_schedule": "Saturday and Sunday.",
+          "add_schedule": "Choose any combination of days.",
           "remove_schedule": "Delete an existing scheduled time."
         }
       },

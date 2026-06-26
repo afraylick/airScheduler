@@ -32,6 +32,8 @@ from .const import (
 
 PROFILES = ["home", "away", "sleep"]
 DAY_OPTIONS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+WEEKDAY_DAYS = ["mon", "tue", "wed", "thu", "fri"]
+WEEKEND_DAYS = ["sat", "sun"]
 HVAC_MODE_OPTIONS = [
     "unchanged",
     "off",
@@ -174,6 +176,7 @@ class AirSchedulerOptionsFlow(config_entries.OptionsFlow):
         """Initialize options flow state."""
         self._config: dict[str, Any] = {}
         self._selected_profile: str | None = None
+        self._schedule_day_default: list[str] | None = None
 
     def _load_config(self) -> dict[str, Any]:
         """Load the current editable config."""
@@ -188,7 +191,10 @@ class AirSchedulerOptionsFlow(config_entries.OptionsFlow):
         self._load_config()
         return self.async_show_menu(
             step_id="init",
-            menu_options=["state_settings", "schedule_times"],
+            menu_options={
+                "state_settings": "State settings",
+                "schedule_times": "Schedule times",
+            },
         )
 
     async def async_step_state_settings(self, user_input=None):
@@ -242,14 +248,31 @@ class AirSchedulerOptionsFlow(config_entries.OptionsFlow):
     async def async_step_schedule_times(self, user_input=None):
         """Show schedule actions."""
         self._load_config()
+        self._schedule_day_default = None
         return self.async_show_menu(
             step_id="schedule_times",
-            menu_options=["add_schedule", "remove_schedule"],
+            menu_options={
+                "add_weekday_schedule": "Add weekday schedule",
+                "add_weekend_schedule": "Add weekend schedule",
+                "add_schedule": "Add custom schedule",
+                "remove_schedule": "Remove schedule time",
+            },
         )
+
+    async def async_step_add_weekday_schedule(self, user_input=None):
+        """Add a weekday scheduled profile application."""
+        self._schedule_day_default = WEEKDAY_DAYS
+        return await self.async_step_add_schedule(user_input)
+
+    async def async_step_add_weekend_schedule(self, user_input=None):
+        """Add a weekend scheduled profile application."""
+        self._schedule_day_default = WEEKEND_DAYS
+        return await self.async_step_add_schedule(user_input)
 
     async def async_step_add_schedule(self, user_input=None):
         """Add a scheduled profile application."""
         config = self._load_config()
+        day_default = self._schedule_day_default or []
 
         if user_input is not None:
             schedule = {
@@ -272,7 +295,7 @@ class AirSchedulerOptionsFlow(config_entries.OptionsFlow):
                     vol.Optional(CONF_NAME): str,
                     vol.Required(CONF_PROFILE, default="home"): _profile_selector(),
                     vol.Required(CONF_TIME): selector({"time": {}}),
-                    vol.Optional(CONF_DAYS, default=[]): selector(
+                    vol.Optional(CONF_DAYS, default=day_default): selector(
                         {
                             "select": {
                                 "multiple": True,
