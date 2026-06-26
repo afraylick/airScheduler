@@ -1,6 +1,6 @@
 # Air Scheduler
 
-Air Scheduler is a Home Assistant custom integration for applying named climate profiles to multiple thermostats on a schedule.
+Air Scheduler is a Home Assistant custom integration for applying named climate profiles to thermostats on a schedule.
 
 The first version is backend-first by design:
 
@@ -14,81 +14,62 @@ Copy `custom_components/air_scheduler` into your Home Assistant `custom_componen
 
 Add the integration from **Settings > Devices & services > Add integration > Air Scheduler**.
 
-The initial setup asks which climate entities Air Scheduler should manage.
+The setup flow asks for one climate entity. Add Air Scheduler again for each additional thermostat. Each configured thermostat is registered as its own Air Scheduler device in Home Assistant.
 
 ## Configure in the UI
 
-Open **Settings > Devices & services > Air Scheduler > Configure**.
+Open **Settings > Devices & services > Air Scheduler**, then choose the thermostat entry you want to configure.
 
 The configure screen is split into separate sections:
 
-- **Thermostats**: choose the climate entities to manage.
-- **State settings**: define the climate settings for Home, Away, and Sleep one thermostat at a time.
-- **Schedule times**: add or remove times when a state is applied.
+- **State settings**: define the climate settings for Home, Away, and Sleep for this thermostat.
+- **Schedule times**: add or remove times when a state is applied to this thermostat.
 
-For each state/thermostat pair, you can set HVAC mode, single temperature, heat/cool low and high temperatures, preset mode, fan mode, and humidity. Leave fields blank when that setting should not be changed.
+For each state, you can set HVAC mode, single temperature, heat/cool low and high temperatures, preset mode, fan mode, and humidity. Leave fields blank when that setting should not be changed.
 
 ## Configure schedules
 
-The GUI is the preferred path. You can also use Developer Tools > Actions and call `air_scheduler.set_config` with a config object shaped like [examples/schedule.json](examples/schedule.json).
+The GUI is the preferred path. You can also use Developer Tools > Actions and call `air_scheduler.set_config` for one managed thermostat.
 
 The key concepts are:
 
 - `profiles`: named states such as `home`, `away`, and `sleep`.
-- Each profile can define per-entity settings and/or a `default` fallback.
-- `schedules`: weekday/time rules that apply one profile to selected climate entities.
-- `apply_on_start`: when true, Home Assistant restart applies the latest scheduled profile for each entity.
+- Each profile defines settings for one thermostat entry.
+- `schedules`: weekday/time rules that apply one profile to that thermostat.
+- `apply_on_start`: when true, Home Assistant restart applies the latest scheduled profile for the thermostat.
 
 Example service data:
 
 ```yaml
+entity_id: climate.downstairs
 config:
   apply_on_start: true
+  entity_id: climate.downstairs
   profiles:
     home:
-      climate.downstairs:
-        hvac_mode: heat_cool
-        target_temp_low: 68
-        target_temp_high: 74
-      climate.upstairs:
-        hvac_mode: heat_cool
-        target_temp_low: 67
-        target_temp_high: 75
+      hvac_mode: heat_cool
+      target_temp_low: 68
+      target_temp_high: 74
     away:
-      default:
-        hvac_mode: heat_cool
-        target_temp_low: 62
-        target_temp_high: 80
+      hvac_mode: heat_cool
+      target_temp_low: 62
+      target_temp_high: 80
     sleep:
-      climate.downstairs:
-        hvac_mode: heat_cool
-        target_temp_low: 65
-        target_temp_high: 78
-      climate.upstairs:
-        hvac_mode: heat_cool
-        target_temp_low: 64
-        target_temp_high: 76
+      hvac_mode: heat_cool
+      target_temp_low: 65
+      target_temp_high: 78
   schedules:
     - id: weekday_morning_home
       days: [mon, tue, wed, thu, fri]
       time: "06:30"
       profile: home
-      entities:
-        - climate.downstairs
-        - climate.upstairs
     - id: weekday_leave
       days: [mon, tue, wed, thu, fri]
       time: "08:15"
       profile: away
-      entities:
-        - climate.downstairs
-        - climate.upstairs
     - id: daily_sleep
       time: "22:30"
       profile: sleep
-      entities:
-        - climate.downstairs
-        - climate.upstairs
 ```
 
 ## Manual override
@@ -101,6 +82,10 @@ entity_id:
   - climate.downstairs
   - climate.upstairs
 ```
+
+## Upgrade from v0.1.x
+
+Version 0.2.0 changes the configuration model from one entry with many thermostats to one entry per thermostat. After upgrading, remove the old Air Scheduler entry and add Air Scheduler once for each thermostat.
 
 ## Next steps
 

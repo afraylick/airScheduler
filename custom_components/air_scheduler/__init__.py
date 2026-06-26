@@ -13,8 +13,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_point_in_time
-from homeassistant.helpers.storage import Store
 import homeassistant.util.dt as dt_util
 
 from .const import (
@@ -22,7 +22,6 @@ from .const import (
     CONF_CONFIG,
     CONF_DAYS,
     CONF_ENABLED,
-    CONF_ENTITIES,
     CONF_HVAC_MODE,
     CONF_PROFILE,
     CONF_PROFILES,
@@ -30,18 +29,19 @@ from .const import (
     CONF_TIME,
     DAY_ALIASES,
     DOMAIN,
+    NAME,
     SERVICE_APPLY_PROFILE,
     SERVICE_RELOAD,
     SERVICE_SET_CONFIG,
-    STORE_KEY,
-    STORE_VERSION,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
+DATA_SCHEDULERS = "schedulers"
+PROFILES = ("home", "away", "sleep")
+
 DEFAULT_CONFIG: dict[str, Any] = {
     CONF_APPLY_ON_START: True,
-    CONF_ENTITIES: [],
     CONF_PROFILES: {
         "home": {},
         "away": {},
@@ -61,9 +61,40 @@ def _plain_data(value: Any) -> Any:
         return [_plain_data(item) for item in value]
     return value
 
+
+def _normalized_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Normalize stored config into the expected per-thermostat shape."""
+    source = _plain_data(config or {})
+    entity_id = source.get(ATTR_ENTITY_ID)
+    if not entity_id and source.get("entities"):
+        entity_id = source["entities"][0]
+
+    normalized = _plain_data(DEFAULT_CONFIG)
+    normalized.update(source)
+    normalized.pop("entities", None)
+    if entity_id:
+        normalized[ATTR_ENTITY_ID] = entity_id
+
+    normalized[CONF_PROFILES] = normalized.get(CONF_PROFILES) or {}
+    for profile in PROFILES:
+        settings = normalized[CONF_PROFILES].get(profile, {})
+        if entity_id and isinstance(settings, dict) and entity_id in settings:
+            settings = settings[entity_id]
+        elif isinstance(settings, dict) and "default" in settings:
+            settings = settings["default"]
+        normalized[CONF_PROFILES][profile] = settings if isinstance(settings, dict) else {}
+
+    normalized[CONF_SCHEDULES] = list(normalized.get(CONF_SCHEDULES) or [])
+    for schedule in normalized[CONF_SCHEDULES]:
+        if isinstance(schedule, dict):
+            schedule.pop("entities", None)
+    return normalized
+
+
 SET_CONFIG_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_CONFIG): dict,
+        vol.Optional(ATTR_ENTITY_ID): cv.entity_id,
     }
 )
 
@@ -76,22 +107,28 @@ APPLY_PROFILE_SCHEMA = vol.Schema(
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
-    """Set up Air Scheduler."""
-    store = Store(hass, STORE_VERSION, STORE_KEY)
-    scheduler = AirScheduler(hass, store)
-    hass.data[DOMAIN] = scheduler
+    """Set up Air Scheduler services."""
+    hass.data.setdefault(DOMAIN, {DATA_SCHEDULERS: {}})
 
     async def async_set_config(call: ServiceCall) -> None:
-        await scheduler.async_set_config(call.data[CONF_CONFIG])
+        schedulers = _matching_schedulers(hass, call.data.get(ATTR_ENTITY_ID))
+        if not schedulers:
+            _LOGGER.warning("No Air Scheduler thermostat matched set_config target")
+            return
+        for scheduler in schedulers:
+            await scheduler.async_set_config(call.data[CONF_CONFIG])
 
     async def async_apply_profile(call: ServiceCall) -> None:
-        await scheduler.async_apply_profile(
-            call.data[CONF_PROFILE],
-            call.data.get(ATTR_ENTITY_ID),
-        )
+        schedulers = _matching_schedulers(hass, call.data.get(ATTR_ENTITY_ID))
+        if not schedulers:
+            _LOGGER.warning("No Air Scheduler thermostat matched apply_profile target")
+            return
+        for scheduler in schedulers:
+            await scheduler.async_apply_profile(call.data[CONF_PROFILE])
 
     async def async_reload(call: ServiceCall) -> None:
-        await scheduler.async_reload()
+        for scheduler in _all_schedulers(hass):
+            await scheduler.async_reload()
 
     hass.services.async_register(
         DOMAIN,
@@ -111,121 +148,152 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         async_reload,
     )
 
-    yaml_config = config.get(DOMAIN)
-    if yaml_config:
-        await scheduler.async_set_config(yaml_config)
-    else:
-        await scheduler.async_reload()
-
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Air Scheduler from a config entry."""
-    scheduler: AirScheduler = hass.data[DOMAIN]
-    await scheduler.async_set_config(entry.options or entry.data or DEFAULT_CONFIG)
+    config = _normalized_config(entry.options or entry.data or DEFAULT_CONFIG)
+    scheduler = AirScheduler(hass, entry, config)
+    hass.data.setdefault(DOMAIN, {DATA_SCHEDULERS: {}})
+    hass.data[DOMAIN][DATA_SCHEDULERS][entry.entry_id] = scheduler
+
+    _register_device(hass, entry, scheduler.entity_id)
+    await scheduler.async_reload()
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload an Air Scheduler config entry."""
+    scheduler = hass.data[DOMAIN][DATA_SCHEDULERS].pop(entry.entry_id, None)
+    if scheduler:
+        scheduler.async_unload()
     return True
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Apply updated options from the integration configure UI."""
-    scheduler: AirScheduler = hass.data[DOMAIN]
-    await scheduler.async_set_config(entry.options or entry.data or DEFAULT_CONFIG)
+    scheduler = hass.data[DOMAIN][DATA_SCHEDULERS].get(entry.entry_id)
+    if scheduler:
+        await scheduler.async_set_config(entry.options or entry.data or DEFAULT_CONFIG)
+
+
+def _register_device(hass: HomeAssistant, entry: ConfigEntry, entity_id: str) -> None:
+    """Register one Air Scheduler device for the managed thermostat."""
+    state = hass.states.get(entity_id)
+    name = entry.title
+    if state:
+        name = state.attributes.get("friendly_name", entity_id)
+
+    device_registry = dr.async_get(hass)
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entity_id)},
+        manufacturer=NAME,
+        model="Scheduled thermostat",
+        name=name,
+    )
+
+
+def _all_schedulers(hass: HomeAssistant) -> list[AirScheduler]:
+    """Return all active scheduler instances."""
+    return list(hass.data.get(DOMAIN, {}).get(DATA_SCHEDULERS, {}).values())
+
+
+def _matching_schedulers(
+    hass: HomeAssistant,
+    entity_ids: list[str] | str | None,
+) -> list[AirScheduler]:
+    """Return schedulers matching an optional entity target."""
+    schedulers = _all_schedulers(hass)
+    if not entity_ids:
+        return schedulers
+    if isinstance(entity_ids, str):
+        targets = {entity_ids}
+    else:
+        targets = set(entity_ids)
+    return [scheduler for scheduler in schedulers if scheduler.entity_id in targets]
 
 
 class AirScheduler:
-    """Schedule climate profile changes."""
+    """Schedule climate profile changes for one thermostat."""
 
-    def __init__(self, hass: HomeAssistant, store: Store) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        config: Mapping[str, Any],
+    ) -> None:
         """Initialize the scheduler."""
         self.hass = hass
-        self._store = store
-        self._config: dict[str, Any] = DEFAULT_CONFIG.copy()
+        self.entry = entry
+        self._config = _normalized_config(config)
         self._unsub_timer: Callable[[], None] | None = None
 
+    @property
+    def entity_id(self) -> str:
+        """Return the managed climate entity id."""
+        return self._config.get(ATTR_ENTITY_ID, "")
+
     async def async_reload(self) -> None:
-        """Reload configuration from storage."""
-        data = await self._store.async_load()
-        self._config = self._normalized_config(data or DEFAULT_CONFIG)
+        """Reload and schedule this thermostat."""
         self._schedule_next()
-        if self._config.get("apply_on_start", True):
+        if self._config.get(CONF_APPLY_ON_START, True):
             await self.async_apply_current()
 
-    async def async_set_config(self, config: dict[str, Any]) -> None:
-        """Persist and activate a full scheduler config."""
-        self._config = self._normalized_config(config)
-        await self._store.async_save(self._config)
+    async def async_set_config(self, config: Mapping[str, Any]) -> None:
+        """Activate an updated scheduler config."""
+        current_entity_id = self.entity_id
+        self._config = _normalized_config(config)
+        self._config.setdefault(ATTR_ENTITY_ID, current_entity_id)
         self._schedule_next()
 
+    def async_unload(self) -> None:
+        """Unload this scheduler."""
+        if self._unsub_timer:
+            self._unsub_timer()
+            self._unsub_timer = None
+
     async def async_apply_current(self) -> None:
-        """Apply the most recent scheduled profile for each climate entity."""
+        """Apply the most recent scheduled profile for this thermostat."""
         now = dt_util.now()
-        latest_by_entity: dict[str, dict[str, Any]] = {}
+        latest: tuple[datetime, str] | None = None
 
         for schedule in self._enabled_schedules():
             last_fire = self._last_fire_before(schedule, now)
             if last_fire is None:
                 continue
+            if latest is None or last_fire > latest[0]:
+                latest = (last_fire, schedule[CONF_PROFILE])
 
-            entities = self._schedule_entities(schedule) or self._profile_entities(
-                schedule[CONF_PROFILE]
-            )
-            for entity_id in entities:
-                current = latest_by_entity.get(entity_id)
-                if current is None or last_fire > current["last_fire"]:
-                    latest_by_entity[entity_id] = {
-                        "last_fire": last_fire,
-                        "profile": schedule[CONF_PROFILE],
-                    }
+        if latest:
+            await self.async_apply_profile(latest[1])
 
-        for entity_id, item in latest_by_entity.items():
-            await self.async_apply_profile(item["profile"], [entity_id])
-
-    async def async_apply_profile(
-        self,
-        profile: str,
-        entity_ids: list[str] | None = None,
-    ) -> None:
-        """Apply a named profile to the selected climate entities."""
-        profiles = self._config.get(CONF_PROFILES, {})
-        profile_settings = profiles.get(profile)
-        if not isinstance(profile_settings, dict):
+    async def async_apply_profile(self, profile: str) -> None:
+        """Apply a named profile to this thermostat."""
+        settings = self._profile_settings(profile)
+        if settings is None:
             _LOGGER.warning("Unknown Air Scheduler profile: %s", profile)
             return
+        if not settings:
+            _LOGGER.warning(
+                "Profile %s has no settings for %s",
+                profile,
+                self.entity_id,
+            )
+            return
+        await self._async_apply_climate_settings(settings)
 
-        targets = entity_ids or [
-            entity_id for entity_id in profile_settings if entity_id != "default"
-        ]
-        for entity_id in targets:
-            settings = profile_settings.get(entity_id) or profile_settings.get("default")
-            if not isinstance(settings, dict):
-                _LOGGER.warning(
-                    "Profile %s has no settings for %s and no default settings",
-                    profile,
-                    entity_id,
-                )
-                continue
-            await self._async_apply_climate_settings(entity_id, settings)
-
-    async def _async_apply_climate_settings(
-        self,
-        entity_id: str,
-        settings: dict[str, Any],
-    ) -> None:
-        """Call climate services for one entity."""
+    async def _async_apply_climate_settings(self, settings: dict[str, Any]) -> None:
+        """Call climate services for this thermostat."""
         hvac_mode = settings.get(CONF_HVAC_MODE)
         if hvac_mode:
             await self.hass.services.async_call(
                 "climate",
                 "set_hvac_mode",
                 {
-                    ATTR_ENTITY_ID: entity_id,
+                    ATTR_ENTITY_ID: self.entity_id,
                     CONF_HVAC_MODE: hvac_mode,
                 },
                 blocking=False,
@@ -239,7 +307,7 @@ class AirScheduler:
             if key in settings
         }
         if temperature_data:
-            temperature_data[ATTR_ENTITY_ID] = entity_id
+            temperature_data[ATTR_ENTITY_ID] = self.entity_id
             await self.hass.services.async_call(
                 "climate",
                 "set_temperature",
@@ -258,7 +326,7 @@ class AirScheduler:
                 "climate",
                 service,
                 {
-                    ATTR_ENTITY_ID: entity_id,
+                    ATTR_ENTITY_ID: self.entity_id,
                     setting_key: settings[setting_key],
                 },
                 blocking=False,
@@ -268,10 +336,7 @@ class AirScheduler:
         """Apply schedules matching this fire time."""
         for schedule in self._enabled_schedules():
             if self._schedule_matches(schedule, now):
-                await self.async_apply_profile(
-                    schedule[CONF_PROFILE],
-                    self._schedule_entities(schedule),
-                )
+                await self.async_apply_profile(schedule[CONF_PROFILE])
         self._schedule_next(now + timedelta(seconds=1))
 
     def _schedule_next(self, after: datetime | None = None) -> None:
@@ -289,7 +354,7 @@ class AirScheduler:
             self._async_fire,
             next_fire,
         )
-        _LOGGER.debug("Next Air Scheduler fire time: %s", next_fire)
+        _LOGGER.debug("Next Air Scheduler fire time for %s: %s", self.entity_id, next_fire)
 
     def _next_fire_after(self, after: datetime) -> datetime | None:
         """Return the next schedule datetime after the provided local time."""
@@ -374,21 +439,17 @@ class AirScheduler:
             valid_schedules.append(schedule)
         return valid_schedules
 
-    def _schedule_entities(self, schedule: dict[str, Any]) -> list[str] | None:
-        """Return entities targeted by a schedule."""
-        entities = schedule.get(CONF_ENTITIES)
-        if entities is None:
-            return None
-        if isinstance(entities, str):
-            return [entities]
-        return list(entities)
-
-    def _profile_entities(self, profile: str) -> list[str]:
-        """Return entities with explicit settings in a profile."""
+    def _profile_settings(self, profile: str) -> dict[str, Any] | None:
+        """Return settings for one profile."""
         profile_settings = self._config.get(CONF_PROFILES, {}).get(profile)
+        if profile_settings is None:
+            return None
         if not isinstance(profile_settings, dict):
-            return []
-        return [entity_id for entity_id in profile_settings if entity_id != "default"]
+            return {}
+        if self.entity_id in profile_settings:
+            nested_settings = profile_settings[self.entity_id]
+            return nested_settings if isinstance(nested_settings, dict) else {}
+        return profile_settings
 
     def _schedule_days(self, schedule: dict[str, Any]) -> set[int]:
         """Return active weekdays for a schedule."""
@@ -417,15 +478,3 @@ class AirScheduler:
         else:
             raise ValueError(f"Invalid schedule time: {value}")
         return time(hour, minute, second)
-
-    @staticmethod
-    def _normalized_config(config: dict[str, Any]) -> dict[str, Any]:
-        """Normalize the persisted config shape."""
-        normalized = _plain_data(DEFAULT_CONFIG)
-        normalized.update(_plain_data(config or {}))
-        normalized[CONF_ENTITIES] = list(normalized.get(CONF_ENTITIES) or [])
-        normalized[CONF_PROFILES] = normalized.get(CONF_PROFILES) or {}
-        for profile in ("home", "away", "sleep"):
-            normalized[CONF_PROFILES].setdefault(profile, {})
-        normalized[CONF_SCHEDULES] = normalized.get(CONF_SCHEDULES) or []
-        return normalized

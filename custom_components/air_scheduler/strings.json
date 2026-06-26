@@ -2,51 +2,41 @@
   "config": {
     "step": {
       "user": {
-        "title": "Set up thermostat scheduling",
-        "description": "Choose the climate entities Air Scheduler should manage.",
+        "title": "Add thermostat schedule",
+        "description": "Choose one climate entity to manage. Add Air Scheduler again for each additional thermostat.",
         "data": {
-          "entities": "Thermostats",
+          "entity_id": "Thermostat",
           "apply_on_start": "Apply the current scheduled state when Home Assistant starts"
         }
       }
     },
     "abort": {
-      "single_instance_allowed": "Air Scheduler is already configured."
+      "already_configured": "This thermostat is already configured."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Configure Air Scheduler",
+        "title": "Configure thermostat schedule",
         "menu_options": {
-          "thermostats": "Thermostats",
           "state_settings": "State settings",
           "schedule_times": "Schedule times"
         },
         "menu_option_descriptions": {
-          "thermostats": "Choose which climate entities Air Scheduler manages.",
-          "state_settings": "Define Home, Away, and Sleep settings for each thermostat.",
-          "schedule_times": "Add or remove times when a state is applied."
-        }
-      },
-      "thermostats": {
-        "title": "Thermostats",
-        "data": {
-          "entities": "Thermostats",
-          "apply_on_start": "Apply the current scheduled state when Home Assistant starts"
+          "state_settings": "Define Home, Away, and Sleep settings for this thermostat.",
+          "schedule_times": "Add or remove times when a state is applied to this thermostat."
         }
       },
       "state_settings": {
         "title": "State settings",
-        "description": "Choose a state and thermostat to edit.",
+        "description": "Choose a state to edit.",
         "data": {
-          "profile": "State",
-          "entities": "Thermostat"
+          "profile": "State"
         }
       },
       "edit_state": {
         "title": "Edit {profile} settings",
-        "description": "{entities}",
+        "description": "{entity_id}",
         "data": {
           "hvac_mode": "HVAC mode",
           "temperature": "Temperature",
@@ -71,7 +61,7 @@
           "remove_schedule": "Remove schedule time"
         },
         "menu_option_descriptions": {
-          "add_schedule": "Choose a state, time, days, and thermostats.",
+          "add_schedule": "Choose a state, time, and days.",
           "remove_schedule": "Delete an existing scheduled time."
         }
       },
@@ -82,7 +72,6 @@
           "profile": "State",
           "time": "Time",
           "days": "Days",
-          "entities": "Thermostats",
           "enabled": "Enabled"
         },
         "data_description": {
@@ -97,7 +86,6 @@
       }
     },
     "error": {
-      "no_thermostats": "Add at least one thermostat first.",
       "no_schedules": "There are no schedules to remove."
     }
   }

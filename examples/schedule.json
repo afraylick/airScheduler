@@ -1,36 +1,21 @@
 {
   "apply_on_start": true,
+  "entity_id": "climate.downstairs",
   "profiles": {
     "home": {
-      "climate.downstairs": {
-        "hvac_mode": "heat_cool",
-        "target_temp_low": 68,
-        "target_temp_high": 74
-      },
-      "climate.upstairs": {
-        "hvac_mode": "heat_cool",
-        "target_temp_low": 67,
-        "target_temp_high": 75
-      }
+      "hvac_mode": "heat_cool",
+      "target_temp_low": 68,
+      "target_temp_high": 74
     },
     "away": {
-      "default": {
-        "hvac_mode": "heat_cool",
-        "target_temp_low": 62,
-        "target_temp_high": 80
-      }
+      "hvac_mode": "heat_cool",
+      "target_temp_low": 62,
+      "target_temp_high": 80
     },
     "sleep": {
-      "climate.downstairs": {
-        "hvac_mode": "heat_cool",
-        "target_temp_low": 65,
-        "target_temp_high": 78
-      },
-      "climate.upstairs": {
-        "hvac_mode": "heat_cool",
-        "target_temp_low": 64,
-        "target_temp_high": 76
-      }
+      "hvac_mode": "heat_cool",
+      "target_temp_low": 65,
+      "target_temp_high": 78
     }
   },
   "schedules": [
@@ -38,21 +23,18 @@
       "id": "weekday_morning_home",
       "days": ["mon", "tue", "wed", "thu", "fri"],
       "time": "06:30",
-      "profile": "home",
-      "entities": ["climate.downstairs", "climate.upstairs"]
+      "profile": "home"
     },
     {
       "id": "weekday_leave",
       "days": ["mon", "tue", "wed", "thu", "fri"],
       "time": "08:15",
-      "profile": "away",
-      "entities": ["climate.downstairs", "climate.upstairs"]
+      "profile": "away"
     },
     {
       "id": "daily_sleep",
       "time": "22:30",
-      "profile": "sleep",
-      "entities": ["climate.downstairs", "climate.upstairs"]
+      "profile": "sleep"
     }
   ]
 }

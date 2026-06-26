@@ -9,6 +9,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import callback
 from homeassistant.helpers.selector import selector
 
@@ -16,7 +17,6 @@ from .const import (
     CONF_APPLY_ON_START,
     CONF_DAYS,
     CONF_ENABLED,
-    CONF_ENTITIES,
     CONF_HVAC_MODE,
     CONF_NAME,
     CONF_PRESET_MODE,
@@ -28,39 +28,32 @@ from .const import (
     CONF_TEMPERATURE,
     CONF_TIME,
     DOMAIN,
-    NAME,
 )
 
 PROFILES = ["home", "away", "sleep"]
-DAY_OPTIONS = [
-    {"value": "mon", "label": "Monday"},
-    {"value": "tue", "label": "Tuesday"},
-    {"value": "wed", "label": "Wednesday"},
-    {"value": "thu", "label": "Thursday"},
-    {"value": "fri", "label": "Friday"},
-    {"value": "sat", "label": "Saturday"},
-    {"value": "sun", "label": "Sunday"},
-]
+DAY_OPTIONS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 HVAC_MODE_OPTIONS = [
-    {"value": "unchanged", "label": "Do not change"},
-    {"value": "off", "label": "Off"},
-    {"value": "heat", "label": "Heat"},
-    {"value": "cool", "label": "Cool"},
-    {"value": "heat_cool", "label": "Heat/Cool"},
-    {"value": "auto", "label": "Auto"},
-    {"value": "dry", "label": "Dry"},
-    {"value": "fan_only", "label": "Fan only"},
+    "unchanged",
+    "off",
+    "heat",
+    "cool",
+    "heat_cool",
+    "auto",
+    "dry",
+    "fan_only",
 ]
 
 
-def _empty_config() -> dict[str, Any]:
-    """Return a fresh empty scheduler config."""
-    return {
+def _empty_config(entity_id: str | None = None) -> dict[str, Any]:
+    """Return a fresh scheduler config for one thermostat."""
+    config = {
         CONF_APPLY_ON_START: True,
-        CONF_ENTITIES: [],
         CONF_PROFILES: {profile: {} for profile in PROFILES},
         CONF_SCHEDULES: [],
     }
+    if entity_id:
+        config[ATTR_ENTITY_ID] = entity_id
+    return config
 
 
 def _plain_data(value: Any) -> Any:
@@ -74,49 +67,36 @@ def _plain_data(value: Any) -> Any:
     return value
 
 
-def _normalize_config(config: dict[str, Any] | None) -> dict[str, Any]:
-    """Normalize config/options into the expected shape."""
-    normalized = _empty_config()
-    normalized.update(_plain_data(config or {}))
-    normalized[CONF_ENTITIES] = list(normalized.get(CONF_ENTITIES) or [])
+def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Normalize config/options into the expected per-thermostat shape."""
+    source = _plain_data(config or {})
+    entity_id = source.get(ATTR_ENTITY_ID)
+    if not entity_id and source.get("entities"):
+        entity_id = source["entities"][0]
+
+    normalized = _empty_config(entity_id)
+    normalized.update(source)
+    normalized.pop("entities", None)
     normalized[CONF_PROFILES] = normalized.get(CONF_PROFILES) or {}
     for profile in PROFILES:
-        normalized[CONF_PROFILES].setdefault(profile, {})
+        settings = normalized[CONF_PROFILES].get(profile, {})
+        if entity_id and isinstance(settings, dict) and entity_id in settings:
+            settings = settings[entity_id]
+        elif isinstance(settings, dict) and "default" in settings:
+            settings = settings["default"]
+        normalized[CONF_PROFILES][profile] = settings if isinstance(settings, dict) else {}
     normalized[CONF_SCHEDULES] = list(normalized.get(CONF_SCHEDULES) or [])
     return normalized
 
 
-def _entity_selector(multiple: bool = True):
-    """Return a climate entity selector."""
-    return selector({"entity": {"domain": "climate", "multiple": multiple}})
+def _entity_selector():
+    """Return a single climate entity selector."""
+    return selector({"entity": {"domain": "climate"}})
 
 
 def _profile_selector():
     """Return a profile selector."""
-    return selector(
-        {
-            "select": {
-                "options": [
-                    {"value": "home", "label": "Home"},
-                    {"value": "away", "label": "Away"},
-                    {"value": "sleep", "label": "Sleep"},
-                ]
-            }
-        }
-    )
-
-
-def _configured_entity_selector(entities: list[str], multiple: bool = False):
-    """Return a selector limited to configured thermostat entities."""
-    return selector(
-        {
-            "select": {
-                "mode": "dropdown",
-                "multiple": multiple,
-                "options": [{"value": entity_id, "label": entity_id} for entity_id in entities],
-            }
-        }
-    )
+    return selector({"select": {"options": PROFILES}})
 
 
 def _number_selector(minimum: int, maximum: int):
@@ -143,7 +123,7 @@ def _optional_with_default(key: str, existing: dict[str, Any]):
 class AirSchedulerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle an Air Scheduler config flow."""
 
-    VERSION = 1
+    VERSION = 2
 
     @staticmethod
     @callback
@@ -152,40 +132,55 @@ class AirSchedulerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return AirSchedulerOptionsFlow()
 
     async def async_step_user(self, user_input=None):
-        """Create one Air Scheduler instance."""
-        if self._async_current_entries():
-            return self.async_abort(reason="single_instance_allowed")
+        """Create one Air Scheduler thermostat entry."""
+        errors = {}
 
         if user_input is not None:
-            config = _empty_config()
-            config[CONF_ENTITIES] = user_input[CONF_ENTITIES]
+            entity_id = user_input[ATTR_ENTITY_ID]
+            await self.async_set_unique_id(entity_id)
+            self._abort_if_unique_id_configured()
+
+            config = _empty_config(entity_id)
             config[CONF_APPLY_ON_START] = user_input[CONF_APPLY_ON_START]
-            return self.async_create_entry(title=NAME, data={}, options=config)
+            return self.async_create_entry(
+                title=self._entry_title(entity_id),
+                data=config,
+                options=config,
+            )
 
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_ENTITIES): _entity_selector(),
+                    vol.Required(ATTR_ENTITY_ID): _entity_selector(),
                     vol.Required(CONF_APPLY_ON_START, default=True): bool,
                 }
             ),
+            errors=errors,
         )
+
+    def _entry_title(self, entity_id: str) -> str:
+        """Return a friendly config entry title."""
+        state = self.hass.states.get(entity_id)
+        if state:
+            return state.attributes.get("friendly_name", entity_id)
+        return entity_id
 
 
 class AirSchedulerOptionsFlow(config_entries.OptionsFlow):
-    """Handle Air Scheduler options."""
+    """Handle Air Scheduler options for one thermostat."""
 
     def __init__(self) -> None:
         """Initialize options flow state."""
         self._config: dict[str, Any] = {}
         self._selected_profile: str | None = None
-        self._selected_entity: str | None = None
 
     def _load_config(self) -> dict[str, Any]:
         """Load the current editable config."""
         if not self._config:
-            self._config = _normalize_config(self.config_entry.options)
+            self._config = _normalize_config(
+                self.config_entry.options or self.config_entry.data
+            )
         return self._config
 
     async def async_step_init(self, user_input=None):
@@ -193,76 +188,33 @@ class AirSchedulerOptionsFlow(config_entries.OptionsFlow):
         self._load_config()
         return self.async_show_menu(
             step_id="init",
-            menu_options=["thermostats", "state_settings", "schedule_times"],
+            menu_options=["state_settings", "schedule_times"],
         )
 
-    async def async_step_thermostats(self, user_input=None):
-        """Configure the thermostat list and restart behavior."""
-        config = self._load_config()
-
+    async def async_step_state_settings(self, user_input=None):
+        """Choose which state settings to edit."""
         if user_input is not None:
-            config[CONF_ENTITIES] = user_input[CONF_ENTITIES]
-            config[CONF_APPLY_ON_START] = user_input[CONF_APPLY_ON_START]
-            self._remove_unconfigured_entity_settings()
-            return self.async_create_entry(title="", data=config)
+            self._selected_profile = user_input[CONF_PROFILE]
+            return await self.async_step_edit_state()
 
         return self.async_show_form(
-            step_id="thermostats",
+            step_id="state_settings",
             data_schema=vol.Schema(
                 {
-                    vol.Required(
-                        CONF_ENTITIES,
-                        default=config.get(CONF_ENTITIES, []),
-                    ): _entity_selector(),
-                    vol.Required(
-                        CONF_APPLY_ON_START,
-                        default=config.get(CONF_APPLY_ON_START, True),
-                    ): bool,
+                    vol.Required(CONF_PROFILE, default="home"): _profile_selector(),
                 }
             ),
         )
 
-    async def async_step_state_settings(self, user_input=None):
-        """Choose which state/entity settings to edit."""
-        config = self._load_config()
-        entities = config.get(CONF_ENTITIES, [])
-        errors = {}
-
-        if not entities:
-            errors["base"] = "no_thermostats"
-
-        if user_input is not None and not errors:
-            self._selected_profile = user_input[CONF_PROFILE]
-            self._selected_entity = user_input[CONF_ENTITIES]
-            return await self.async_step_edit_state()
-
-        schema = {}
-        if entities:
-            schema = {
-                vol.Required(CONF_PROFILE, default="home"): _profile_selector(),
-                vol.Required(CONF_ENTITIES): _configured_entity_selector(entities),
-            }
-
-        return self.async_show_form(
-            step_id="state_settings",
-            data_schema=vol.Schema(schema),
-            errors=errors,
-        )
-
     async def async_step_edit_state(self, user_input=None):
-        """Edit climate settings for one profile/entity pair."""
+        """Edit climate settings for one profile."""
         config = self._load_config()
         profile = self._selected_profile or "home"
-        entity_id = self._selected_entity or ""
-        existing = (
-            config.get(CONF_PROFILES, {})
-            .get(profile, {})
-            .get(entity_id, {})
-        )
+        existing = config.get(CONF_PROFILES, {}).get(profile, {})
 
         if user_input is not None:
             settings = self._clean_state_settings(user_input)
-            config[CONF_PROFILES].setdefault(profile, {})[entity_id] = settings
+            config[CONF_PROFILES][profile] = settings
             return self.async_create_entry(title="", data=config)
 
         hvac_default = existing.get(CONF_HVAC_MODE, "unchanged")
@@ -282,8 +234,8 @@ class AirSchedulerOptionsFlow(config_entries.OptionsFlow):
             step_id="edit_state",
             data_schema=vol.Schema(schema),
             description_placeholders={
-                CONF_PROFILE: profile.title(),
-                CONF_ENTITIES: entity_id,
+                CONF_PROFILE: profile,
+                ATTR_ENTITY_ID: config.get(ATTR_ENTITY_ID, ""),
             },
         )
 
@@ -298,19 +250,13 @@ class AirSchedulerOptionsFlow(config_entries.OptionsFlow):
     async def async_step_add_schedule(self, user_input=None):
         """Add a scheduled profile application."""
         config = self._load_config()
-        entities = config.get(CONF_ENTITIES, [])
-        errors = {}
 
-        if not entities:
-            errors["base"] = "no_thermostats"
-
-        if user_input is not None and not errors:
+        if user_input is not None:
             schedule = {
                 "id": self._unique_schedule_id(user_input),
                 CONF_NAME: user_input.get(CONF_NAME) or self._schedule_label(user_input),
                 CONF_PROFILE: user_input[CONF_PROFILE],
                 CONF_TIME: user_input[CONF_TIME],
-                CONF_ENTITIES: user_input[CONF_ENTITIES],
                 CONF_ENABLED: user_input[CONF_ENABLED],
             }
             if user_input.get(CONF_DAYS):
@@ -319,31 +265,24 @@ class AirSchedulerOptionsFlow(config_entries.OptionsFlow):
             config[CONF_SCHEDULES].append(schedule)
             return self.async_create_entry(title="", data=config)
 
-        schema = {}
-        if entities:
-            schema = {
-                vol.Optional(CONF_NAME): str,
-                vol.Required(CONF_PROFILE, default="home"): _profile_selector(),
-                vol.Required(CONF_TIME): selector({"time": {}}),
-                vol.Optional(CONF_DAYS, default=[]): selector(
-                    {
-                        "select": {
-                            "multiple": True,
-                            "options": DAY_OPTIONS,
-                        }
-                    }
-                ),
-                vol.Required(CONF_ENTITIES, default=entities): _configured_entity_selector(
-                    entities,
-                    multiple=True,
-                ),
-                vol.Required(CONF_ENABLED, default=True): bool,
-            }
-
         return self.async_show_form(
             step_id="add_schedule",
-            data_schema=vol.Schema(schema),
-            errors=errors,
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_NAME): str,
+                    vol.Required(CONF_PROFILE, default="home"): _profile_selector(),
+                    vol.Required(CONF_TIME): selector({"time": {}}),
+                    vol.Optional(CONF_DAYS, default=[]): selector(
+                        {
+                            "select": {
+                                "multiple": True,
+                                "options": DAY_OPTIONS,
+                            }
+                        }
+                    ),
+                    vol.Required(CONF_ENABLED, default=True): bool,
+                }
+            ),
         )
 
     async def async_step_remove_schedule(self, user_input=None):
@@ -356,7 +295,7 @@ class AirSchedulerOptionsFlow(config_entries.OptionsFlow):
             errors["base"] = "no_schedules"
 
         if user_input is not None and not errors:
-            selected_index = int(user_input["schedule_index"])
+            selected_index = int(str(user_input["schedule_index"]).split(":", 1)[0])
             config[CONF_SCHEDULES] = [
                 schedule
                 for index, schedule in enumerate(schedules)
@@ -371,10 +310,7 @@ class AirSchedulerOptionsFlow(config_entries.OptionsFlow):
                     {
                         "select": {
                             "options": [
-                                {
-                                    "value": str(index),
-                                    "label": self._schedule_label(schedule),
-                                }
+                                f"{index}: {self._schedule_label(schedule)}"
                                 for index, schedule in enumerate(schedules)
                             ]
                         }
@@ -387,14 +323,6 @@ class AirSchedulerOptionsFlow(config_entries.OptionsFlow):
             data_schema=vol.Schema(schema),
             errors=errors,
         )
-
-    def _remove_unconfigured_entity_settings(self) -> None:
-        """Drop saved settings for entities no longer managed by the scheduler."""
-        configured = set(self._config.get(CONF_ENTITIES, []))
-        for profile_settings in self._config.get(CONF_PROFILES, {}).values():
-            for entity_id in list(profile_settings):
-                if entity_id != "default" and entity_id not in configured:
-                    profile_settings.pop(entity_id)
 
     @staticmethod
     def _clean_state_settings(user_input: dict[str, Any]) -> dict[str, Any]:
