@@ -330,6 +330,31 @@ class AirSchedulerPanel extends HTMLElement {
     return `${profile.charAt(0).toUpperCase()}${profile.slice(1)}`;
   }
 
+  _temperatureSummary(entityId, profile) {
+    const settings = this._config.profiles?.[profile]?.[entityId] || {};
+    if (settings.hvac_mode === "off") {
+      return "Off";
+    }
+    const unit =
+      this._hass?.states?.[entityId]?.attributes?.temperature_unit ||
+      this._hass?.config?.unit_system?.temperature ||
+      "°";
+    const formatTemp = (value) => `${value}${unit}`;
+    if (settings.target_temp_low !== undefined && settings.target_temp_high !== undefined) {
+      return `${formatTemp(settings.target_temp_low)}-${formatTemp(settings.target_temp_high)}`;
+    }
+    if (settings.temperature !== undefined) {
+      return formatTemp(settings.temperature);
+    }
+    if (settings.target_temp_low !== undefined) {
+      return `Low ${formatTemp(settings.target_temp_low)}`;
+    }
+    if (settings.target_temp_high !== undefined) {
+      return `High ${formatTemp(settings.target_temp_high)}`;
+    }
+    return settings.hvac_mode ? this._profileLabel(settings.hvac_mode.replace(/_/g, " ")) : "No temp";
+  }
+
   _weekBlocksForEntity(entityId) {
     const transitions = [];
     for (const { schedule, index } of this._scheduleEntriesForEntity(entityId)) {
@@ -409,7 +434,7 @@ class AirSchedulerPanel extends HTMLElement {
         blocks.push({
           index: active.index,
           profile,
-          name: active.schedule.name || this._profileLabel(profile),
+          temperature: this._temperatureSummary(entityId, profile),
           startMinute: start - dayStart,
           endMinute: end - dayStart,
           time: active.schedule.time || "06:30",
@@ -465,6 +490,18 @@ class AirSchedulerPanel extends HTMLElement {
       this._collapsedSections.add(section);
     }
     this._render();
+  }
+
+  _entityPanelKey(kind, entityId) {
+    return `${kind}:${entityId}`;
+  }
+
+  _isEntityPanelCollapsed(kind, entityId) {
+    return this._collapsedSections.has(this._entityPanelKey(kind, entityId));
+  }
+
+  _toggleEntityPanel(kind, entityId) {
+    this._toggleSection(this._entityPanelKey(kind, entityId));
   }
 
   _render() {
@@ -625,6 +662,8 @@ class AirSchedulerPanel extends HTMLElement {
       <div class="thermostat-schedules">
         ${this._config.entities.map((entityId) => {
           const schedules = this._scheduleEntriesForEntity(entityId);
+          const calendarCollapsed = this._isEntityPanelCollapsed("calendar", entityId);
+          const segmentsCollapsed = this._isEntityPanelCollapsed("segments", entityId);
           return `
             <article class="thermostat-schedule">
               <div class="thermostat-schedule-head">
@@ -633,13 +672,21 @@ class AirSchedulerPanel extends HTMLElement {
                   <small>${entityId}</small>
                 </div>
                 <div class="thermostat-actions">
+                  ${schedules.length ? `
+                    <button data-toggle-entity-panel="calendar" data-panel-entity="${entityId}">
+                      ${calendarCollapsed ? "Show calendar" : "Hide calendar"}
+                    </button>
+                    <button data-toggle-entity-panel="segments" data-panel-entity="${entityId}">
+                      ${segmentsCollapsed ? "Show segments" : "Hide segments"}
+                    </button>
+                  ` : ""}
                   <button data-add-schedule="${entityId}">Add segment</button>
                   <button class="danger" data-remove-entity="${entityId}" title="Remove thermostat">Remove</button>
                 </div>
               </div>
               ${schedules.length ? `
-                ${this._renderWeekView(entityId)}
-                <div class="schedule-list">
+                ${calendarCollapsed ? "" : this._renderWeekView(entityId)}
+                <div class="schedule-list ${segmentsCollapsed ? "collapsed-panel" : ""}">
                   ${schedules.map(({ schedule, index }) => this._renderScheduleRow(schedule, index)).join("")}
                 </div>
               ` : `<p class="empty schedule-empty">No segments yet.</p>`}
@@ -675,10 +722,12 @@ class AirSchedulerPanel extends HTMLElement {
                   class="week-block profile-${block.profile}"
                   data-focus-schedule="${block.index}"
                   style="top: ${block.top}%; height: ${block.height}%;"
-                  title="${this._escape(`${DAY_LABELS[day]} ${this._formatMinutes(block.startMinute)}-${this._formatMinutes(block.endMinute)}: ${block.name}`)}"
+                  title="${this._escape(`${DAY_LABELS[day]} ${this._formatMinutes(block.startMinute)}-${this._formatMinutes(block.endMinute)}: ${this._profileLabel(block.profile)} ${block.temperature}`)}"
                 >
-                  <strong>${this._profileLabel(block.profile)}</strong>
-                  <span>${this._escape(block.name)}</span>
+                  <span class="week-block-head">
+                    <strong>${this._profileLabel(block.profile)}</strong>
+                    <span>${this._escape(block.temperature)}</span>
+                  </span>
                   <small>${this._formatMinutes(block.startMinute)}-${this._formatMinutes(block.endMinute)}</small>
                 </button>
               `).join("")}
@@ -731,6 +780,11 @@ class AirSchedulerPanel extends HTMLElement {
     this.querySelector("#save-states")?.addEventListener("click", () => this._saveConfig());
     this.querySelectorAll("[data-toggle-section]").forEach((button) => {
       button.addEventListener("click", () => this._toggleSection(button.dataset.toggleSection));
+    });
+    this.querySelectorAll("[data-toggle-entity-panel]").forEach((button) => {
+      button.addEventListener("click", () => {
+        this._toggleEntityPanel(button.dataset.toggleEntityPanel, button.dataset.panelEntity);
+      });
     });
     this.querySelector("#apply-on-start")?.addEventListener("change", (event) => {
       this._config.apply_on_start = event.target.checked;
@@ -1086,6 +1140,21 @@ class AirSchedulerPanel extends HTMLElement {
           text-overflow: ellipsis;
           white-space: nowrap;
         }
+        .week-block .week-block-head {
+          display: flex;
+          align-items: baseline;
+          gap: 6px;
+          min-width: 0;
+        }
+        .week-block .week-block-head strong,
+        .week-block .week-block-head span {
+          min-width: 0;
+        }
+        .week-block .week-block-head span {
+          color: var(--secondary-text-color);
+          font-size: 11px;
+          line-height: 1.1;
+        }
         .week-block strong {
           font-size: 12px;
           line-height: 1.1;
@@ -1111,6 +1180,9 @@ class AirSchedulerPanel extends HTMLElement {
           display: flex;
           flex-direction: column;
           gap: 12px;
+        }
+        .collapsed-panel {
+          display: none;
         }
         .schedule-row {
           border: 1px solid var(--divider-color);
