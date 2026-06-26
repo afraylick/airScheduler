@@ -1,46 +1,79 @@
 {
   "apply_on_start": true,
-  "entity_id": "climate.downstairs",
+  "entities": ["climate.bedroom", "climate.downstairs"],
   "profiles": {
     "home": {
-      "hvac_mode": "heat_cool",
-      "target_temp_low": 68,
-      "target_temp_high": 74
+      "climate.bedroom": {
+        "hvac_mode": "heat_cool",
+        "target_temp_low": 68,
+        "target_temp_high": 74
+      },
+      "climate.downstairs": {
+        "hvac_mode": "heat_cool",
+        "target_temp_low": 66,
+        "target_temp_high": 75
+      }
     },
     "away": {
-      "hvac_mode": "heat_cool",
-      "target_temp_low": 62,
-      "target_temp_high": 80
+      "climate.bedroom": {
+        "hvac_mode": "heat_cool",
+        "target_temp_low": 62,
+        "target_temp_high": 80
+      },
+      "climate.downstairs": {
+        "hvac_mode": "heat_cool",
+        "target_temp_low": 60,
+        "target_temp_high": 82
+      }
     },
     "sleep": {
-      "hvac_mode": "heat_cool",
-      "target_temp_low": 65,
-      "target_temp_high": 78
+      "climate.bedroom": {
+        "hvac_mode": "heat_cool",
+        "target_temp_low": 64,
+        "target_temp_high": 76
+      },
+      "climate.downstairs": {
+        "hvac_mode": "heat_cool",
+        "target_temp_low": 65,
+        "target_temp_high": 78
+      }
     }
   },
   "schedules": [
     {
       "id": "weekday_morning_home",
+      "name": "Weekday morning",
+      "enabled": true,
       "days": ["mon", "tue", "wed", "thu", "fri"],
       "time": "06:30",
-      "profile": "home"
+      "profile": "home",
+      "entities": ["climate.bedroom", "climate.downstairs"]
     },
     {
       "id": "weekday_leave",
+      "name": "Weekday leave",
+      "enabled": true,
       "days": ["mon", "tue", "wed", "thu", "fri"],
       "time": "08:15",
-      "profile": "away"
+      "profile": "away",
+      "entities": ["climate.bedroom", "climate.downstairs"]
     },
     {
-      "id": "weekend_home",
+      "id": "weekend_morning_home",
+      "name": "Weekend morning",
+      "enabled": true,
       "days": ["sat", "sun"],
       "time": "08:00",
-      "profile": "home"
+      "profile": "home",
+      "entities": ["climate.bedroom"]
     },
     {
       "id": "daily_sleep",
+      "name": "Daily sleep",
+      "enabled": true,
       "time": "22:30",
-      "profile": "sleep"
+      "profile": "sleep",
+      "entities": ["climate.bedroom", "climate.downstairs"]
     }
   ]
 }

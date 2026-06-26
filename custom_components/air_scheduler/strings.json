@@ -2,95 +2,12 @@
   "config": {
     "step": {
       "user": {
-        "title": "Add thermostat schedule",
-        "description": "Choose one climate entity to manage. Add Air Scheduler again for each additional thermostat.",
-        "data": {
-          "entity_id": "Thermostat",
-          "apply_on_start": "Apply the current scheduled state when Home Assistant starts"
-        }
+        "title": "Set up Air Scheduler",
+        "description": "Create the Air Scheduler panel. After setup, open Air Scheduler from the sidebar to add thermostats, define Home/Away/Sleep settings, and build schedules."
       }
     },
     "abort": {
-      "already_configured": "This thermostat is already configured."
-    }
-  },
-  "option": {
-    "step": {
-      "init": {
-        "title": "Configure thermostat schedule",
-        "menu_options": {
-          "state_settings": "State settings",
-          "schedule_times": "Schedule times"
-        },
-        "menu_option_descriptions": {
-          "state_settings": "Define Home, Away, and Sleep settings for this thermostat.",
-          "schedule_times": "Add or remove times when a state is applied to this thermostat."
-        }
-      },
-      "state_settings": {
-        "title": "State settings",
-        "description": "Choose a state to edit.",
-        "data": {
-          "profile": "State"
-        }
-      },
-      "edit_state": {
-        "title": "Edit {profile} settings",
-        "description": "{entity_id}",
-        "data": {
-          "hvac_mode": "HVAC mode",
-          "temperature": "Temperature",
-          "target_temp_low": "Low temperature",
-          "target_temp_high": "High temperature",
-          "preset_mode": "Preset mode",
-          "fan_mode": "Fan mode",
-          "humidity": "Humidity"
-        },
-        "data_description": {
-          "temperature": "Use for heat-only, cool-only, or single-setpoint thermostats.",
-          "target_temp_low": "Use with heat/cool thermostats.",
-          "target_temp_high": "Use with heat/cool thermostats.",
-          "preset_mode": "Leave blank unless your thermostat supports named presets.",
-          "fan_mode": "Leave blank unless your thermostat supports fan modes."
-        }
-      },
-      "schedule_times": {
-        "title": "Schedule times",
-        "menu_options": {
-          "add_weekday_schedule": "Add weekday schedule",
-          "add_weekend_schedule": "Add weekend schedule",
-          "add_schedule": "Add custom schedule",
-          "remove_schedule": "Remove schedule time"
-        },
-        "menu_option_descriptions": {
-          "add_weekday_schedule": "Monday through Friday.",
-          "add_weekend_schedule": "Saturday and Sunday.",
-          "add_schedule": "Choose any combination of days.",
-          "remove_schedule": "Delete an existing scheduled time."
-        }
-      },
-      "add_schedule": {
-        "title": "Add schedule time",
-        "data": {
-          "name": "Name",
-          "profile": "State",
-          "time": "Time",
-          "days": "Days",
-          "enabled": "Enabled"
-        },
-        "data_description": {
-          "days": "Leave empty to run every day."
-        }
-      },
-      "remove_schedule": {
-        "title": "Remove schedule time",
-        "data": {
-          "schedule_index": "Schedule"
-        }
-      }
-    },
-    "error": {
-      "no_schedules": "There are no schedules to remove."
+      "single_instance_allowed": "Air Scheduler is already configured."
     }
   }
 }
