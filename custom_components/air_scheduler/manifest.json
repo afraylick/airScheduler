@@ -3,6 +3,7 @@
   "name": "Air Scheduler",
   "codeowners": [],
   "config_flow": true,
-  "documentation": "https://github.com/adam-froehlich/airScheduler",
+  "documentation": "https://github.com/afraylick/airScheduler",
+  "issue_tracker": "https://github.com/afraylick/airScheduler/issues",
   "version": "0.1.0"
 }
