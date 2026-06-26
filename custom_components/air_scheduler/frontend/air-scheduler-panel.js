@@ -12,6 +12,8 @@ const SETTING_FIELDS = [
   ["fan_mode", "Fan"],
   ["humidity", "Humidity"],
 ];
+const NUMBER_FIELDS = ["temperature", "target_temp_low", "target_temp_high", "humidity"];
+const TEMPERATURE_FIELDS = ["temperature", "target_temp_low", "target_temp_high"];
 
 class AirSchedulerPanel extends HTMLElement {
   connectedCallback() {
@@ -51,6 +53,7 @@ class AirSchedulerPanel extends HTMLElement {
   }
 
   async _saveConfig() {
+    this._syncFormToConfig();
     this._saving = true;
     this._error = "";
     this._render();
@@ -136,7 +139,7 @@ class AirSchedulerPanel extends HTMLElement {
     const settings = this._config.profiles[profile][entityId];
     if (value === "") {
       delete settings[key];
-    } else if (["temperature", "target_temp_low", "target_temp_high", "humidity"].includes(key)) {
+    } else if (NUMBER_FIELDS.includes(key)) {
       settings[key] = Number(value);
     } else {
       settings[key] = value;
@@ -147,7 +150,7 @@ class AirSchedulerPanel extends HTMLElement {
   }
 
   _isSettingDisabled(key, hvacMode) {
-    if (!["temperature", "target_temp_low", "target_temp_high"].includes(key)) {
+    if (!TEMPERATURE_FIELDS.includes(key)) {
       return false;
     }
     if (["off", "fan_only"].includes(hvacMode)) {
@@ -165,7 +168,7 @@ class AirSchedulerPanel extends HTMLElement {
   _pruneDisabledSettings(profile, entityId) {
     const settings = this._config.profiles[profile][entityId];
     const hvacMode = settings.hvac_mode || "";
-    for (const key of ["temperature", "target_temp_low", "target_temp_high"]) {
+    for (const key of TEMPERATURE_FIELDS) {
       if (this._isSettingDisabled(key, hvacMode)) {
         delete settings[key];
       }
@@ -270,6 +273,25 @@ class AirSchedulerPanel extends HTMLElement {
     }
   }
 
+  _syncFormToConfig() {
+    this.querySelectorAll("[data-profile][data-entity][data-setting]").forEach((input) => {
+      if (input.disabled) {
+        return;
+      }
+      this._setProfileValue(
+        input.dataset.profile,
+        input.dataset.entity,
+        input.dataset.setting,
+        input.value
+      );
+    });
+    this.querySelectorAll("[data-schedule-field]").forEach((input) => {
+      const value = input.type === "checkbox" ? input.checked : input.value;
+      this._setScheduleValue(Number(input.dataset.schedule), input.dataset.scheduleField, value);
+    });
+    this._config.apply_on_start = Boolean(this.querySelector("#apply-on-start")?.checked);
+  }
+
   _render() {
     if (!this._hass || !this._config) {
       this.innerHTML = this._style() + `<main><p>Loading Air Scheduler...</p></main>`;
@@ -329,7 +351,9 @@ class AirSchedulerPanel extends HTMLElement {
           <div class="section-head">
             <h2>State settings</h2>
             <div class="profile-actions">
-              ${PROFILES.map((profile) => `<button data-apply-profile="${profile}">Apply ${profile}</button>`).join("")}
+              <button class="primary" id="save-states" ${this._saving ? "disabled" : ""}>
+                ${this._saving ? "Saving..." : "Apply all state settings"}
+              </button>
             </div>
           </div>
           ${this._renderProfileGrid()}
@@ -408,10 +432,13 @@ class AirSchedulerPanel extends HTMLElement {
               </datalist>
             ` : `
               <input
+                type="${NUMBER_FIELDS.includes(key) ? "number" : "text"}"
+                ${TEMPERATURE_FIELDS.includes(key) ? "step=\"1\"" : ""}
+                ${key === "humidity" ? "min=\"0\" max=\"100\" step=\"1\"" : ""}
                 data-profile="${profile}"
                 data-entity="${entityId}"
                 data-setting="${key}"
-                value="${settings[key] ?? ""}"
+                value="${this._isSettingDisabled(key, hvacMode) ? "" : settings[key] ?? ""}"
                 ${this._isSettingDisabled(key, hvacMode) ? "disabled" : ""}
               >
             `}
@@ -478,6 +505,7 @@ class AirSchedulerPanel extends HTMLElement {
 
   _bindEvents() {
     this.querySelector("#save")?.addEventListener("click", () => this._saveConfig());
+    this.querySelector("#save-states")?.addEventListener("click", () => this._saveConfig());
     this.querySelector("#apply-on-start")?.addEventListener("change", (event) => {
       this._config.apply_on_start = event.target.checked;
     });
@@ -487,9 +515,6 @@ class AirSchedulerPanel extends HTMLElement {
 
     this.querySelectorAll("[data-remove-entity]").forEach((button) => {
       button.addEventListener("click", () => this._removeEntity(button.dataset.removeEntity));
-    });
-    this.querySelectorAll("[data-apply-profile]").forEach((button) => {
-      button.addEventListener("click", () => this._applyProfile(button.dataset.applyProfile));
     });
     this.querySelectorAll("[data-add-schedule]").forEach((button) => {
       button.addEventListener("click", () => this._addSchedule(button.dataset.addSchedule));
