@@ -3,6 +3,7 @@ const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri"];
 const WEEKENDS = ["sat", "sun"];
 const FALLBACK_HVAC_MODES = ["off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only"];
+const FALLBACK_FAN_MODES = ["auto", "on", "circulate", "quiet", "low", "medium", "high"];
 const SETTING_FIELDS = [
   ["hvac_mode", "HVAC"],
   ["temperature", "Temp"],
@@ -21,6 +22,7 @@ class AirSchedulerPanel extends HTMLElement {
     this._saving = false;
     this._loading = false;
     this._error = "";
+    this._collapsedSections = new Set(["thermostats", "state_settings"]);
     if (this._hass) {
       this._loadConfig();
     } else {
@@ -110,7 +112,7 @@ class AirSchedulerPanel extends HTMLElement {
 
   _fanModes(entityId) {
     const modes = this._hass?.states?.[entityId]?.attributes?.fan_modes;
-    return Array.isArray(modes) ? modes : [];
+    return Array.isArray(modes) && modes.length ? modes : FALLBACK_FAN_MODES;
   }
 
   _addEntity(entityId) {
@@ -292,6 +294,19 @@ class AirSchedulerPanel extends HTMLElement {
     this._config.apply_on_start = Boolean(this.querySelector("#apply-on-start")?.checked);
   }
 
+  _isCollapsed(section) {
+    return this._collapsedSections?.has(section);
+  }
+
+  _toggleSection(section) {
+    if (this._collapsedSections.has(section)) {
+      this._collapsedSections.delete(section);
+    } else {
+      this._collapsedSections.add(section);
+    }
+    this._render();
+  }
+
   _render() {
     if (!this._hass || !this._config) {
       this.innerHTML = this._style() + `<main><p>Loading Air Scheduler...</p></main>`;
@@ -323,9 +338,12 @@ class AirSchedulerPanel extends HTMLElement {
 
         ${this._error ? `<div class="error">${this._escape(this._error)}</div>` : ""}
 
-        <section>
+        <section data-section="thermostats" class="${this._isCollapsed("thermostats") ? "collapsed" : ""}">
           <div class="section-head">
-            <h2>Thermostats</h2>
+            <button class="section-toggle" data-toggle-section="thermostats" aria-expanded="${!this._isCollapsed("thermostats")}">
+              <span>${this._isCollapsed("thermostats") ? "▸" : "▾"}</span>
+              <h2>Thermostats</h2>
+            </button>
             <div class="inline-add">
               <select id="entity-picker">
                 <option value="">Add thermostat...</option>
@@ -336,7 +354,7 @@ class AirSchedulerPanel extends HTMLElement {
               <button id="add-entity">Add</button>
             </div>
           </div>
-          <div class="entity-list">
+          <div class="section-body entity-list">
             ${this._config.entities.map((entityId) => `
               <div class="entity-pill">
                 <span>${this._escape(this._friendlyName(entityId))}</span>
@@ -347,16 +365,21 @@ class AirSchedulerPanel extends HTMLElement {
           </div>
         </section>
 
-        <section>
+        <section data-section="state_settings" class="${this._isCollapsed("state_settings") ? "collapsed" : ""}">
           <div class="section-head">
-            <h2>State settings</h2>
+            <button class="section-toggle" data-toggle-section="state_settings" aria-expanded="${!this._isCollapsed("state_settings")}">
+              <span>${this._isCollapsed("state_settings") ? "▸" : "▾"}</span>
+              <h2>State settings</h2>
+            </button>
             <div class="profile-actions">
               <button class="primary" id="save-states" ${this._saving ? "disabled" : ""}>
                 ${this._saving ? "Saving..." : "Apply all state settings"}
               </button>
             </div>
           </div>
-          ${this._renderProfileGrid()}
+          <div class="section-body">
+            ${this._renderProfileGrid()}
+          </div>
         </section>
 
         <section>
@@ -399,7 +422,6 @@ class AirSchedulerPanel extends HTMLElement {
   _renderProfileCell(profile, entityId) {
     const settings = this._config.profiles[profile]?.[entityId] || {};
     const hvacMode = settings.hvac_mode || "";
-    const datalistId = `fan-modes-${profile}-${entityId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
     return `
       <div class="profile-cell">
         ${SETTING_FIELDS.map(([key, label]) => `
@@ -417,19 +439,25 @@ class AirSchedulerPanel extends HTMLElement {
                 `).join("")}
               </select>
             ` : key === "fan_mode" ? `
-              <input
-                data-profile="${profile}"
-                data-entity="${entityId}"
-                data-setting="${key}"
-                value="${settings[key] ?? ""}"
-                list="${datalistId}"
-                placeholder="Optional"
-              >
-              <datalist id="${datalistId}">
-                ${this._fanModes(entityId).map((mode) => `
-                  <option value="${mode}"></option>
-                `).join("")}
-              </datalist>
+              <div class="combo">
+                <input
+                  data-profile="${profile}"
+                  data-entity="${entityId}"
+                  data-setting="${key}"
+                  value="${settings[key] ?? ""}"
+                >
+                <select
+                  data-fan-select
+                  data-profile="${profile}"
+                  data-entity="${entityId}"
+                  aria-label="Common fan modes"
+                >
+                  <option value="">Modes</option>
+                  ${this._fanModes(entityId).map((mode) => `
+                    <option value="${mode}">${mode}</option>
+                  `).join("")}
+                </select>
+              </div>
             ` : `
               <input
                 type="${NUMBER_FIELDS.includes(key) ? "number" : "text"}"
@@ -506,6 +534,9 @@ class AirSchedulerPanel extends HTMLElement {
   _bindEvents() {
     this.querySelector("#save")?.addEventListener("click", () => this._saveConfig());
     this.querySelector("#save-states")?.addEventListener("click", () => this._saveConfig());
+    this.querySelectorAll("[data-toggle-section]").forEach((button) => {
+      button.addEventListener("click", () => this._toggleSection(button.dataset.toggleSection));
+    });
     this.querySelector("#apply-on-start")?.addEventListener("change", (event) => {
       this._config.apply_on_start = event.target.checked;
     });
@@ -531,6 +562,18 @@ class AirSchedulerPanel extends HTMLElement {
       };
       input.addEventListener("input", update);
       input.addEventListener("change", update);
+    });
+    this.querySelectorAll("[data-fan-select]").forEach((select) => {
+      select.addEventListener("change", () => {
+        if (!select.value) {
+          return;
+        }
+        const input = select.parentElement?.querySelector("[data-setting='fan_mode']");
+        if (input) {
+          input.value = select.value;
+          this._setProfileValue(select.dataset.profile, select.dataset.entity, "fan_mode", select.value);
+        }
+      });
     });
     this.querySelectorAll("[data-schedule-field]").forEach((input) => {
       input.addEventListener("change", () => {
@@ -612,6 +655,28 @@ class AirSchedulerPanel extends HTMLElement {
         .section-head {
           justify-content: space-between;
           margin-bottom: 14px;
+        }
+        .section-toggle {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          border: 0;
+          background: transparent;
+          padding: 0;
+        }
+        .section-toggle span {
+          width: 18px;
+          color: var(--secondary-text-color);
+        }
+        section.collapsed .section-body {
+          display: none;
+        }
+        section.collapsed .inline-add,
+        section.collapsed .profile-actions {
+          display: none;
+        }
+        section.collapsed .section-head {
+          margin-bottom: 0;
         }
         button, select, input {
           font: inherit;
@@ -699,6 +764,14 @@ class AirSchedulerPanel extends HTMLElement {
           display: grid;
           grid-template-columns: repeat(2, minmax(88px, 1fr));
           gap: 8px;
+        }
+        .combo {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 6px;
+        }
+        .combo select {
+          max-width: 92px;
         }
         label {
           display: flex;
