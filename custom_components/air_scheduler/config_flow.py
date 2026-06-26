@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
+from collections.abc import Mapping
 import re
 from typing import Any
 
@@ -63,10 +63,21 @@ def _empty_config() -> dict[str, Any]:
     }
 
 
+def _plain_data(value: Any) -> Any:
+    """Convert Home Assistant read-only config data into plain containers."""
+    if isinstance(value, Mapping):
+        return {key: _plain_data(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_plain_data(item) for item in value]
+    if isinstance(value, tuple):
+        return [_plain_data(item) for item in value]
+    return value
+
+
 def _normalize_config(config: dict[str, Any] | None) -> dict[str, Any]:
     """Normalize config/options into the expected shape."""
     normalized = _empty_config()
-    normalized.update(deepcopy(config or {}))
+    normalized.update(_plain_data(config or {}))
     normalized[CONF_ENTITIES] = list(normalized.get(CONF_ENTITIES) or [])
     normalized[CONF_PROFILES] = normalized.get(CONF_PROFILES) or {}
     for profile in PROFILES:

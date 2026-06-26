@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from copy import deepcopy
+from collections.abc import Callable, Mapping
 from datetime import datetime, time, timedelta
 import logging
 from typing import Any
@@ -50,6 +49,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     CONF_SCHEDULES: [],
 }
+
+
+def _plain_data(value: Any) -> Any:
+    """Convert Home Assistant read-only config data into plain containers."""
+    if isinstance(value, Mapping):
+        return {key: _plain_data(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_plain_data(item) for item in value]
+    if isinstance(value, tuple):
+        return [_plain_data(item) for item in value]
+    return value
 
 SET_CONFIG_SCHEMA = vol.Schema(
     {
@@ -411,8 +421,8 @@ class AirScheduler:
     @staticmethod
     def _normalized_config(config: dict[str, Any]) -> dict[str, Any]:
         """Normalize the persisted config shape."""
-        normalized = deepcopy(DEFAULT_CONFIG)
-        normalized.update(deepcopy(config or {}))
+        normalized = _plain_data(DEFAULT_CONFIG)
+        normalized.update(_plain_data(config or {}))
         normalized[CONF_ENTITIES] = list(normalized.get(CONF_ENTITIES) or [])
         normalized[CONF_PROFILES] = normalized.get(CONF_PROFILES) or {}
         for profile in ("home", "away", "sleep"):
